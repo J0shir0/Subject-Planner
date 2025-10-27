@@ -1,0 +1,25 @@
+{
+  "programId": "psychology-bsc",
+  "studentId": "u123",
+  "years": [
+    {
+      "year": 1,
+      "semesters": [
+        {
+          "semester": 1,
+          "items": [
+            { "type": "core", "subjectId": "PSY101", "title": "Intro to Psychology", "status":  "Completed", "credits": 3 },
+            { "type": "core", "subjectId": "STA101", "title": "Statistics I", "credits": 3 }
+          ]
+        },
+        {
+          "semester": 2,
+          "items": [
+            { "type": "core", "subjectId": "PSY102", "title": "Biopsychology", "credits": 3 },
+            { "type": "electiveSlot", "slotId": "E-1", "bucketId": "free-electives-y1s2", "status":  "TBD","requiredCredits": 3 }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "subject-planner-api",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "cassandra-driver": "^4.6.4",
+    "cors": "^2.8.5",
+    "express": "^4.18.2"
+  }
+}

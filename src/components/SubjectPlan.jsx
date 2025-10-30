@@ -40,7 +40,11 @@ const SubjectPlan = ({ student, planPath = "plans/2025-01.dsl", onLogout }) => {
         setErr(''); setLoading(true);
         try {
             // Import all DSLs in src/plans as raw strings
-            const allPlans = import.meta.glob('/src/plans/*.dsl', { as: 'raw', eager: true });
+            const allPlans = import.meta.glob('/src/plans/*.dsl', {
+                query: '?raw',
+                import: 'default',
+                eager: true,
+            });
 
             // Build candidate filenames from the planPath’s last segment
             const base = (planPath.split('/').pop() || '').trim();

@@ -23,11 +23,12 @@ export const appConfig = {
 
     // Cassandra connection (placeholders; wire up in Phase 2)
     cassandra: {
-        contactPoints: (process.env.CASSANDRA_CONTACT_POINTS || "127.0.0.1").split(","),
-        keyspace: process.env.CASSANDRA_KEYSPACE || "subjectplanningprod",
+        contactPoints: (process.env.CASSANDRA_CONTACT_POINTS || "sunway.hep88.com").split(","),
+        keyspace: process.env.CASSANDRA_KEYSPACE || "subjectplanning",
         datacenter: process.env.CASSANDRA_DATACENTER || "datacenter1",
-        username: process.env.CASSANDRA_USERNAME || "",
-        password: process.env.CASSANDRA_PASSWORD || "",
+        port: Number(process.env.CASSANDRA_PORT || 9042),
+        username: process.env.CASSANDRA_USERNAME || "planusertest",
+        password: process.env.CASSANDRA_PASSWORD || "Ic7cU8K965Zqx",
         // sensible defaults; tune later
         pooling: { coreConnectionsPerHost: { local: 2, remote: 1 } },
         readTimeout: Number(process.env.CASSANDRA_READ_TIMEOUT_MS || 10000),

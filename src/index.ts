@@ -3,6 +3,11 @@ import { connectCassandra, isCassandraAvailable, cassandraClient } from "./servi
 import { getStudentById } from "./services/studentService";
 import { getStudentSemesterProgress } from "./services/progressService";
 import { buildRetakePlanForStudent } from "./utils/retakePlanner";
+import { loadAllPlans, listPlans } from "./dsl/registry";
+
+// load plans once at start
+loadAllPlans();
+console.log("[plans] available:", listPlans());
 
 async function main() {
     await connectCassandra();

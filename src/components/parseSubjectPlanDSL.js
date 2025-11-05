@@ -1,4 +1,3 @@
-// src/parseSubjectPlanDSL.js
 // Lenient parser for the Subject Plan DSL (https://wookeat.github.io/)
 // - Sem headers: "Sem-1 (YYYY-MM):" or "Sem 1 (YYYY):"
 // - Supports running semester numbers (Sem-4..Sem-9) and normalizes per-year: ((n-1)%3)+1

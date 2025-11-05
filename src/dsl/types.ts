@@ -18,6 +18,7 @@ export interface YearPlan {
 
 export interface ProgrammePlan {
     programmeCode: string;     // e.g. "481BCS"
+    cohort?: string;           // e.g., "2025-01"
     title?: string;
     years: YearPlan[];         // ordered Y1..Y3/4
 }

@@ -1,6 +1,9 @@
 import { getSubjectAttemptsByStudentId } from "./subjectService";
 import { mapExamToSemester } from "../utils/semesterMapper";
 import { classifyByGrade, AttemptOutcome, parseAttemptKind, AttemptKind } from "../utils/attemptClassifier";
+import { getPlan } from "../dsl/registry";
+import { getStudentById } from "./studentService";
+import { ProgrammePlan } from "../dsl/types";
 
 interface SemesterBucket {
     semesterCode: string;      // e.g. "2020-JAN"
@@ -23,8 +26,22 @@ interface SemesterBucket {
  * Build a per-semester view of a student's subjects.
  * Input: studentId (number) -> fetch subjects -> group -> summarize.
  */
-export async function getStudentSemesterProgress(studentId: number | string): Promise<SemesterBucket[]> {
+function normalizeCohort(raw: string): string {
+    const m = String(raw || "").match(/^(\d{4})(\d{2})$/); // e.g., "202501" -> ["2025","01"]
+    return m ? `${m[1]}-${m[2]}` : "";
+}
+
+export async function getStudentSemesterProgress(
+    studentId: number | string
+): Promise<SemesterBucket[]> {
     const attempts = await getSubjectAttemptsByStudentId(studentId);
+
+    // fetch student, derive cohort & programme
+    const student = await getStudentById(studentId);
+    const programmeCode: string = student?.programmeCode ?? attempts[0]?.programmeCode ?? "";
+    const cohort: string = normalizeCohort(student?.cohort ?? "");
+
+    const plan: ProgrammePlan | null = programmeCode ? getPlan(programmeCode, cohort) : null;
 
     // bucket by semester code
     const buckets = new Map<string, SemesterBucket>();

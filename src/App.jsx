@@ -25,7 +25,7 @@ export default function App() {
 
         if (!student) return <Login onLogin={handleLogin} />;
 
-        const planPath = `${student.cohort.trim()}.dsl`; // e.g. "2025-01.dsl"
+        const planPath = `${student.cohort.trim()}.dsl`; // e.g. "2024-01.dsl"
         <SubjectPlan student={student} planPath={planPath} onLogout={handleLogout} />
 
 

@@ -62,7 +62,11 @@ export function getPlan(programmeCode: string, cohort?: string): ProgrammePlan |
 export function listPlans(): Array<{ key: string; programmeCode: string; cohort?: string }> {
     const out: Array<{ key: string; programmeCode: string; cohort?: string }> = [];
     for (const [key, plan] of registry.entries()) {
-        if (plan.cohort) out.push({ key, programmeCode: plan.programmeCode, cohort: plan.cohort });
+        // only list the exact key (programme + cohort), not the programme-only alias
+        const exactKey = makeKey(plan.programmeCode, plan.cohort);
+        if (key === exactKey) {
+            out.push({ key, programmeCode: plan.programmeCode, cohort: plan.cohort });
+        }
     }
-    return out.sort((a,b) => a.key.localeCompare(b.key));
+    return out.sort((a, b) => a.key.localeCompare(b.key));
 }

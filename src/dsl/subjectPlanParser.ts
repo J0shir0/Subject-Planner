@@ -2,24 +2,40 @@ import type {
     ProgrammePlan, YearPlan, SemesterPlan, PlanSemester, PlannedSubject,
 } from "./types";
 
+/** Map a YYYY-MM to the uni semester code. */
 function monthToSem(yyyyDashMm: string): PlanSemester {
     const m = Number(yyyyDashMm.slice(5, 7));
+    // canonical
     if (m === 1) return "JAN";
     if (m === 4) return "APR";
     if (m === 9) return "SEP";
-    // special shifts you told me about:
-    if (m === 3) return "JAN";
-    if (m === 8) return "APR";
+    // supervisor’s “shifted” months
+    if (m === 3) return "JAN";  // late short-sem exams
+    if (m === 8) return "APR";  // April sem with Aug exams
+    // fallback (rare)
     return "APR";
 }
 
-function parseModuleLine(text: string): { code: string; name: string; credits?: number } {
-    const cred = text.match(/\[(\d+)\]\s*$/);
-    const credits = cred ? Number(cred[1]) : undefined;
-    const noCred = text.replace(/\s*\[\d+\]\s*$/, "");
-    const parts = noCred.trim().split(/\s+/, 2);
-    const code = (parts[0] || "").trim();
-    const name = (parts[1] || "").trim() || code;
+/**
+ * Parse a subject line after stripping the leading marker ("! " or "+ ").
+ * Supports codes like "MPU3212" or "MPU 3212" and keeps the full name.
+ * Examples accepted:
+ *   "MPU 3212 Critical Thinking [2]"
+ *   "CSC2103 Data Structure & Algorithms [4]"
+ */
+function parseModuleLine(text: string): { code?: string; name?: string; credits?: number } {
+    let credits: number | undefined;
+    const withoutCred = text.replace(/\s*\[(\d+)\]\s*$/, (_, g1) => {
+        credits = Number(g1);
+        return "";
+    });
+
+    // CODE = letters+digits(+optional trailing letter), allowing internal spaces before digits.
+    // NAME  = the rest
+    const m = withoutCred.trim().match(/^([A-Z]{2,}\s*\d{3,4}[A-Z]?)[\s-]+(.+)$/i);
+    if (!m) return {};
+    const code = m[1].toUpperCase().replace(/\s+/g, ""); // "MPU 3212" -> "MPU3212"
+    const name = m[2].trim();
     return { code, name, credits };
 }
 
@@ -32,16 +48,17 @@ function inferYearFromSemIndex(semIdx: number): 1 | 2 | 3 | 4 {
     return 4;
 }
 
-/** Parse your wookeat-style DSL text into an internal ProgrammePlan. */
+/** Parse the wookeat-style DSL into an internal ProgrammePlan. */
 export function parseSubjectPlan(dslText: string): ProgrammePlan {
     const text = dslText.replace(/^\uFEFF/, "");
     const lines = text.split(/\r?\n/);
 
     let programmeCode = "UNKNOWN";
     let cohort: string | undefined = undefined;
-    // extend SemesterPlan locally with an internal `_idx`
+
+    // extend SemesterPlan locally with an internal index to infer year
     let currentSem: (SemesterPlan & { _idx: number }) | null = null;
-    let currentYearNum = 0; // inferred from Sem-X
+    let currentYearNum = 0;
     let currentGroup: { kind: GroupKind; pick: number; items: PlannedSubject[] } | null = null;
 
     const years = new Map<number, YearPlan>();
@@ -64,21 +81,10 @@ export function parseSubjectPlan(dslText: string): ProgrammePlan {
         const line = rawLine.trim();
         if (!line) continue;
 
-        if (line.startsWith("Cohort:")) {
-            cohort = line.slice(7).trim();          // e.g., "2025-01"
-            continue;
-        }
-        if (line.startsWith("Date:") || line === "Modules:") {
-            continue;
-        }
-
-        const courseHit = line.match(/^course\s*:\s*(.+)$/i);
-        if (courseHit) { programmeCode = courseHit[1].trim(); continue; }
-
-        const cohortHit = line.match(/^cohort\s*:\s*(.+)$/i);
-        if (cohortHit) { cohort = cohortHit[1].trim(); continue; }
-
-        if (/^date\s*:/.test(line)) continue;
+        // headers (case-insensitive)
+        if (line.toLowerCase().startsWith("cohort:")) { cohort = line.slice(7).trim(); continue; }
+        if (line.toLowerCase().startsWith("course:")) { programmeCode = line.slice(7).trim(); continue; }
+        if (line.toLowerCase().startsWith("date:")) continue;
         if (line.toLowerCase() === "modules:") continue;
 
         // Sem-4 (2025-01):
@@ -86,9 +92,9 @@ export function parseSubjectPlan(dslText: string): ProgrammePlan {
         if (semMatch) {
             flushGroup();
             commitSem();
-            const idx = Number(semMatch[1]);      // N from Sem-N
-            const yyyymm = semMatch[2];           // YYYY-MM
-            currentYearNum = 0;                   // keep inferring
+            const idx = Number(semMatch[1]);
+            const yyyymm = semMatch[2];
+            currentYearNum = 0; // keep inferring
             currentSem = { _idx: idx, sem: monthToSem(yyyymm), subjects: [] };
             continue;
         }
@@ -109,6 +115,10 @@ export function parseSubjectPlan(dslText: string): ProgrammePlan {
         if (line.startsWith("! ")) {
             if (!currentSem) continue;
             const mod = parseModuleLine(line.slice(2));
+            if (!mod.code || !mod.name) {
+                console.warn(`[dsl] skipped malformed required line: ${line}`);
+                continue;
+            }
             currentSem.subjects.push({ code: mod.code, name: mod.name, kind: "core" });
             continue;
         }
@@ -116,6 +126,10 @@ export function parseSubjectPlan(dslText: string): ProgrammePlan {
         // group item: "+ CODE Name [4]"
         if (line.startsWith("+ ")) {
             const mod = parseModuleLine(line.slice(2));
+            if (!mod.code || !mod.name) {
+                console.warn(`[dsl] skipped malformed elective line: ${line}`);
+                continue;
+            }
             const subject: PlannedSubject = { code: mod.code, name: mod.name };
             if (currentGroup) {
                 subject.kind = currentGroup.kind === "unireq" ? "unrestricted" : "elective";

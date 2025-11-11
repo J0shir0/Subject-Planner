@@ -12,7 +12,7 @@ const getProgress = (plan) => {
     return total ? (done / total) * 100 : 0;
 };
 
-const SubjectPlan = ({ student, planPath = "plans/2025-01.dsl", onLogout }) => {
+const SubjectPlan = ({ student, planPath = "plans/2024-01.dsl", onLogout }) => {
     // --- State and Refs for Plan & UI ---
     const [plan, setPlan] = useState([]);               // plan comes from DSL
     const [activeSlot, setActiveSlot] = useState(null); // { slotId, bucketId, options? }

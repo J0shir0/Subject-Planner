@@ -14,7 +14,7 @@ export async function getStudentById(id: number | string): Promise<StudentDTO | 
     const query = `
     SELECT id, programme, cohort, ic, name, overallcgpa, programmecode, status, gender, graduated, broadsheetyear
     FROM subjectplanning.students
-    WHERE id = ?;
+    WHERE id = ? ALLOW FILTERING
   `;
 
     try {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import SubjectPlan from "./components/SubjectPlan.jsx";
 import Login from "./components/Login.jsx";
+import ServerSchedule from "./components/ServerSchedule";
 
 export default function App() {
         const [student, setStudent] = useState(null);
@@ -26,14 +27,15 @@ export default function App() {
         if (!student) return <Login onLogin={handleLogin} />;
 
         const planPath = `${student.cohort.trim()}.dsl`; // e.g. "2024-01.dsl"
-        <SubjectPlan student={student} planPath={planPath} onLogout={handleLogout} />
-
 
         return (
-            <SubjectPlan
-                student={student}
-                planPath={planPath}
-                onLogout={handleLogout}
-            />
+            <>
+                    <SubjectPlan
+                        student={student}
+                        planPath={planPath}
+                        onLogout={handleLogout}
+                    />
+                    <ServerSchedule studentId={student.studentId} />
+            </>
         );
 }

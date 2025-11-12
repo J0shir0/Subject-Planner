@@ -4,8 +4,11 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "node index.js"
+    "build": "tsc",
+    "server:api": "node dist/server/http.js",
+    "dev:api": "tsc -w"
   },
+
   "dependencies": {
     "cassandra-driver": "^4.6.4",
     "cors": "^2.8.5",

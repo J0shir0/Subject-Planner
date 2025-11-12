@@ -25,18 +25,44 @@ function monthToSem(yyyyDashMm: string): PlanSemester {
  */
 function parseModuleLine(text: string): { code?: string; name?: string; credits?: number } {
     let credits: number | undefined;
-    const withoutCred = text.replace(/\s*\[(\d+)\]\s*$/, (_, g1) => {
+    const noCred = text.replace(/\s*\[(\d+)\]\s*$/, (_m, g1) => {
         credits = Number(g1);
         return "";
     });
 
     // CODE = letters+digits(+optional trailing letter), allowing internal spaces before digits.
     // NAME  = the rest
-    const m = withoutCred.trim().match(/^([A-Z]{2,}\s*\d{3,4}[A-Z]?)[\s-]+(.+)$/i);
-    if (!m) return {};
-    const code = m[1].toUpperCase().replace(/\s+/g, ""); // "MPU 3212" -> "MPU3212"
-    const name = m[2].trim();
-    return { code, name, credits };
+    const trimmed = noCred.trim();
+
+    // 1) split once at the first whitespace run
+    const firstSpace = trimmed.search(/\s+/);
+    if (firstSpace <= 0) return {}; // no name part -> malformed
+
+    const rawCode = trimmed.slice(0, firstSpace);      // e.g. "MPU", "CSC2103", "MPU3332"
+    const rest = trimmed.slice(firstSpace).trim(); // the name part
+
+    // If the code was split like "MPU 3332", pull next numeric chunk
+    let codeCandidate = rawCode;
+    if (/^[A-Za-z]+$/.test(rawCode)) {
+        const m2 = rest.match(/^(\d{3,4}[A-Za-z]?)(?:\s+|$)(.*)$/);
+        if (m2) {
+            codeCandidate = (rawCode + m2[1]);       // "MPU" + "3332" -> "MPU3332"
+            return { code: codeCandidate.toUpperCase(), name: (m2[2] || "").trim(), credits };
+        }
+    }
+
+    // Normal case: already “CSC2103 …” or “MPU3332 …”
+    if (/^[A-Za-z]{2,}\d{3,4}[A-Za-z]?$/.test(codeCandidate)) {
+        return { code: codeCandidate.toUpperCase(), name: rest, credits };
+    }
+
+    // Fallback: collapse spaces inside code and try again
+    const collapsed = codeCandidate.replace(/\s+/g, "");
+    if (/^[A-Za-z]{2,}\d{3,4}[A-Za-z]?$/.test(collapsed)) {
+        return { code: collapsed.toUpperCase(), name: rest, credits };
+    }
+
+    return {};
 }
 
 type GroupKind = "elective" | "altpool" | "unireq";

@@ -5,32 +5,38 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build:web": "vite build",
     "preview": "vite preview",
-
-    "server:build": "tsc",
-    "server:start": "node dist/index.js",
-    "server:dev": "npm run server:build && npm run server:start",
-
+    "build": "tsc",
+    "build:server": "tsc",
+    "server:api": "node dist/server/http.js",
+    "dev:api": "tsc -w",
     "lint": "eslint ."
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.13",
     "cassandra-driver": "^4.8.0",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1",
-    "tailwindcss": "^4.1.13"
+    "react-dom": "^19.1.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
+    "@tailwindcss/postcss": "^4.1.17",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.5",
     "@types/node": "^24.9.2",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.4.22",
     "eslint": "^9.33.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.3.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.17",
     "typescript": "^5.9.3",
     "vite": "^7.1.2"
   }

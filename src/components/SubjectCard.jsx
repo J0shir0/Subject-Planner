@@ -1,5 +1,5 @@
 const SubjectCard = ({ subject, onClear }) => {
-    // keep the whole object so we can read slotKind etc.
+    // keep the whole object, so we can read slotKind etc.
     const { code, name, credits, status, type, slotKind } = subject;
 
     const isElective = type === 'elective';

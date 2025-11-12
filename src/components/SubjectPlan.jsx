@@ -3,6 +3,7 @@ import YearSection from './YearSection.jsx';
 import TopBar from './TopBar.jsx';
 import ElectivePanel from './ElectivePanel.jsx';
 import { parseSubjectPlanDSL } from './parseSubjectPlanDSL.js';
+import { fetchSchedule } from '../web/apiClient.js';
 
 // progress helper
 const getProgress = (plan) => {
@@ -11,6 +12,57 @@ const getProgress = (plan) => {
     const done = all.filter(sub => sub.status === 'Completed').length;
     return total ? (done / total) * 100 : 0;
 };
+
+// Turn API schedule [{year, sem, subjectCode, subjectName, reason}] into your UI plan
+function scheduleToPlan(schedule, cohortYear) {
+    // Group by calendar year + sem
+    const byYearSem = new Map(); // "2025-APR" -> [{code,name},...]
+    for (const it of schedule) {
+        const key = `${it.year}-${it.sem}`;
+        if (!byYearSem.has(key)) byYearSem.set(key, []);
+        byYearSem.get(key).push({ code: it.subjectCode, name: it.subjectName });
+    }
+
+    // Build YearSection-style structure: [{ year, semesters:[{ id, sem, subjects:[] }] }]
+    // yearNumber = (calendarYear - cohortYear) + 1  (kept in 1..4-ish for display)
+    const yearsMap = new Map(); // yearNumber -> { year, semesters: [...] }
+    const order = s => (s === 'JAN' ? 0 : s === 'APR' ? 1 : 2);
+
+    for (const [key, list] of byYearSem.entries()) {
+        const [yyyy, sem] = key.split('-');
+        const calYear = Number(yyyy);
+        const yearNumber = Math.max(1, (calYear - cohortYear) + 1);
+
+        if (!yearsMap.has(yearNumber)) yearsMap.set(yearNumber, { year: yearNumber, semesters: [] });
+        yearsMap.get(yearNumber).semesters.push({
+            id: `${calYear}-${sem}`,
+            sem,
+            subjects: list.map((s, idx) => ({
+                id: `${s.code}-${idx}`,
+                type: 'core',
+                slotKind: undefined,
+                code: s.code,
+                name: s.name || s.code,
+                credits: null,
+                status: 'Planned',
+            })),
+        });
+    }
+
+    // Sort semesters within each year: JAN, APR, SEP
+    const years = Array.from(yearsMap.values()).map(y => ({
+        ...y,
+        semesters: y.semesters.sort((a, b) =>
+            a.id.slice(0,4) !== b.id.slice(0,4)
+                ? a.id.slice(0,4) - b.id.slice(0,4)
+                : order(a.sem) - order(b.sem)
+        ),
+    }));
+
+    // Sort years ascending
+    years.sort((a,b) => a.year - b.year);
+    return years;
+}
 
 const SubjectPlan = ({ student, planPath = "plans/2024-01.dsl", onLogout }) => {
     // --- State and Refs for Plan & UI ---
@@ -36,46 +88,38 @@ const SubjectPlan = ({ student, planPath = "plans/2024-01.dsl", onLogout }) => {
     useEffect(() => { loadFailed(); }, [loadFailed]);
 
     // --- load from DSL (using planPath) ---
+    const loadFromAPI = useCallback(async () => {
+        setErr(''); setLoading(true);
+        try {
+            const data = await fetchSchedule(student.studentId);
+            // derive cohortYear from "2024-01"
+            const cohortYear = Number((data.cohort || '').slice(0,4)) || new Date().getFullYear();
+            const uiPlan = scheduleToPlan(data.schedule || [], cohortYear);
+            setPlan(uiPlan);
+        } catch (e) {
+            throw e;
+        } finally {
+            setLoading(false);
+        }
+    }, [student?.studentId]);
+
     const loadFromDSL = useCallback(async () => {
         setErr(''); setLoading(true);
         try {
-            // Import all DSLs in src/plans as raw strings
-            const allPlans = import.meta.glob('/src/plans/*.dsl', {
-                query: '?raw',
-                import: 'default',
-                eager: true,
-            });
-
-            // Build candidate filenames from the planPath’s last segment
+            const allPlans = import.meta.glob('/src/plans/*.dsl', { query: '?raw', import: 'default', eager: true });
             const base = (planPath.split('/').pop() || '').trim();
-            const candidates = [
-                base,
-                base.replace(/-/g, '_'),
-                base.replace(/_/g, '-'),
-            ].filter((v, i, a) => v && a.indexOf(v) === i); // unique & non-empty
-
-            // Find the first that exists
-            let text = null, chosenKey = null;
+            const candidates = [base, base.replace(/-/g, '_'), base.replace(/_/g, '-')].filter((v,i,a)=>v && a.indexOf(v)===i);
+            let text = null;
             for (const name of candidates) {
                 const key = `/src/plans/${name}`;
-                if (allPlans[key]) { text = allPlans[key]; chosenKey = key; break; }
+                if (allPlans[key]) { text = allPlans[key]; break; }
             }
-
-            if (!text) {
-                console.warn('Available DSL keys:', Object.keys(allPlans));
-                throw new Error(`Cohort file not found for ${base}. Tried: ${candidates.join(', ')}`);
-            }
+            if (!text) throw new Error(`Cohort file not found for ${base}`);
 
             const { plan: parsedPlan, buckets } = parseSubjectPlanDSL(text.replace(/^\uFEFF/, ''));
             bucketsRef.current = buckets;
             setPlan(parsedPlan);
-
-            if (!parsedPlan?.length) {
-                console.warn('[Planner] Parsed 0 semesters from', chosenKey, 'First 3 lines:\n',
-                    text.split(/\r?\n/).slice(0,3).join('\n'));
-            }
         } catch (e) {
-            console.error('[Planner] loadFromDSL error:', e);
             setErr(e.message || 'DSL parse failed');
             setPlan([]);
         } finally {
@@ -83,10 +127,27 @@ const SubjectPlan = ({ student, planPath = "plans/2024-01.dsl", onLogout }) => {
         }
     }, [planPath]);
 
-    useEffect(() => { loadFromDSL(); }, [loadFromDSL]);
+    useEffect(() => {
+        (async () => {
+            try {
+                await loadFromAPI();        // prefer server schedule
+            } catch (e) {
+                console.warn('[Planner] API failed, falling back to DSL:', e?.message || e);
+                await loadFromDSL();        // fallback if API is down or route missing
+            }
+        })();
+    }, [loadFromAPI, loadFromDSL]);
 
     // --- top bar actions ---
-    const handleReset = () => loadFromDSL();
+    const handleReset = () => {
+        (async () => {
+            try {
+                await loadFromAPI();
+            } catch {
+                await loadFromDSL();
+            }
+        })();
+    };
 
     // --- subject mutations (keep status change + elective clear) ---
     const handleChangeStatus = (semesterId, subjectId, nextStatus) => {

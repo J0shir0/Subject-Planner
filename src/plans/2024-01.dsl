@@ -36,7 +36,8 @@ Modules:
             + BIS2102 Information System Analysis & Design [4]
         ! PRG2104 Object-Oriented Programming [4]
         ! ENG2044 Communication Skills [4]
-        ? MPU3332 Integrity and Anti-Corruption (KIAR) [2]
+        ? Year-2 {1}
+            + MPU3332 Integrity and Anti-Corruption (KIAR) [2]
 
     Sem-6 (2025-09):
         # Year-2 {1}
@@ -81,7 +82,8 @@ Modules:
             + CSC3044 Computer Security [4]
             + CSC3014 Computer Vision [4]
             + CSC3209 Software Architecture and Design Patterns [4]
-        ? MPU3422 Community Service for Planetary Health [2]
+        ? Year-3 {1}
+            + MPU3422 Community Service for Planetary Health [2]
 
     Sem-9 (2026-09):
         * Year-3 {1}

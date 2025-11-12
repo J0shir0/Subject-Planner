@@ -39,6 +39,11 @@ export function loadAllPlans(): void {
         try {
             const raw = fs.readFileSync(full, "utf8");
             const plan = parseSubjectPlan(raw);
+            const apr2025 = plan.years
+                .flatMap(y => y.semesters
+                    .filter(s => s.sem === "APR")
+                    .flatMap(s => s.subjects.map(x => x.code)));
+            console.log("[plans] 2025-APR codes:", apr2025);
             if (!plan.programmeCode) { console.warn(`[plans] ${file}: missing Course:`); continue; }
             if (!plan.cohort)        { console.warn(`[plans] ${file}: missing Cohort:`); continue; }
             const key = makeKey(plan.programmeCode, plan.cohort);

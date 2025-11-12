@@ -96,6 +96,7 @@ export function buildSchedule(
                 // If you need exact years from cohort, plug it here.
 
                 for (const subj of sem.subjects) {
+                    if (subj.kind === "elective") continue;
                     schedule.push({
                         year: calYear,
                         sem: sem.sem,

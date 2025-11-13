@@ -3,7 +3,7 @@ import YearSection from './YearSection.jsx';
 import TopBar from './TopBar.jsx';
 import ElectivePanel from './ElectivePanel.jsx';
 import { parseSubjectPlanDSL } from './parseSubjectPlanDSL.js';
-import { fetchSchedule } from '../web/apiClient.js';
+import { fetchSchedule, fetchAttempts } from '../web/apiClient.js';
 
 // progress helper
 const getProgress = (plan) => {
@@ -13,18 +13,32 @@ const getProgress = (plan) => {
     return total ? (done / total) * 100 : 0;
 };
 
+function isPass(grade) {
+    if (!grade) return false;
+    const g = grade.toUpperCase().trim();
+    // treat anything not F/F* as pass; tweak if you have P/EX rules
+    return g !== 'F' && g !== 'F*';
+}
+function isFail(grade) {
+    if (!grade) return false;
+    const g = grade.toUpperCase().trim();
+    return g === 'F' || g === 'F*';
+}
+
 // Turn API schedule [{year, sem, subjectCode, subjectName, reason}] into your UI plan
-function scheduleToPlan(schedule, cohortYear) {
-    // Group by calendar year + sem
-    const byYearSem = new Map(); // "2025-APR" -> [{code,name},...]
+function scheduleToPlan(schedule, cohortYear, passedSet, failedSet) {
+    const byYearSem = new Map(); // "2025-APR" -> [{code,name,reason}, ...]
+
     for (const it of schedule) {
         const key = `${it.year}-${it.sem}`;
         if (!byYearSem.has(key)) byYearSem.set(key, []);
-        byYearSem.get(key).push({ code: it.subjectCode, name: it.subjectName });
+        byYearSem.get(key).push({
+            code: String(it.subjectCode || '').toUpperCase().trim(),
+            name: it.subjectName || it.subjectCode,
+            reason: it.reason || 'LINEUP',
+        });
     }
 
-    // Build YearSection-style structure: [{ year, semesters:[{ id, sem, subjects:[] }] }]
-    // yearNumber = (calendarYear - cohortYear) + 1  (kept in 1..4-ish for display)
     const yearsMap = new Map(); // yearNumber -> { year, semesters: [...] }
     const order = s => (s === 'JAN' ? 0 : s === 'APR' ? 1 : 2);
 
@@ -33,33 +47,41 @@ function scheduleToPlan(schedule, cohortYear) {
         const calYear = Number(yyyy);
         const yearNumber = Math.max(1, (calYear - cohortYear) + 1);
 
-        if (!yearsMap.has(yearNumber)) yearsMap.set(yearNumber, { year: yearNumber, semesters: [] });
+        if (!yearsMap.has(yearNumber)) {
+            yearsMap.set(yearNumber, { year: yearNumber, semesters: [] });
+        }
+
         yearsMap.get(yearNumber).semesters.push({
             id: `${calYear}-${sem}`,
             sem,
-            subjects: list.map((s, idx) => ({
-                id: `${s.code}-${idx}`,
-                type: 'core',
-                slotKind: undefined,
-                code: s.code,
-                name: s.name || s.code,
-                credits: null,
-                status: 'Planned',
-            })),
+            subjects: list.map((s, idx) => {
+                const code = s.code;
+                const status =
+                    passedSet.has(code) ? 'Completed' :
+                        failedSet.has(code)  ? 'Failed'    :
+                            'Planned';
+
+                return {
+                    id: `${code}-${idx}`,
+                    type: 'core',      // <- ensures no chooser for MPUs
+                    slotKind: undefined,
+                    code,
+                    name: s.name || code,
+                    credits: null,
+                    status,
+                };
+            }),
         });
     }
 
-    // Sort semesters within each year: JAN, APR, SEP
     const years = Array.from(yearsMap.values()).map(y => ({
         ...y,
         semesters: y.semesters.sort((a, b) =>
-            a.id.slice(0,4) !== b.id.slice(0,4)
-                ? a.id.slice(0,4) - b.id.slice(0,4)
+            Number(a.id.slice(0,4)) !== Number(b.id.slice(0,4))
+                ? Number(a.id.slice(0,4)) - Number(b.id.slice(0,4))
                 : order(a.sem) - order(b.sem)
         ),
     }));
-
-    // Sort years ascending
     years.sort((a,b) => a.year - b.year);
     return years;
 }
@@ -70,34 +92,50 @@ const SubjectPlan = ({ student, planPath = "plans/2024-01.dsl", onLogout }) => {
     const [activeSlot, setActiveSlot] = useState(null); // { slotId, bucketId, options? }
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState('');
-    const [repeatOpen, setRepeatOpen] = useState(false);
+    // const [repeatOpen, setRepeatOpen] = useState(false);
     const bucketsRef = useRef({});                      // bucketId -> options[]
     const progress = getProgress(plan);
 
     // --- Failed subjects state (mock for now) ---
-    const [failed, setFailed] = useState([]); // [{code, name, credits}, ...]
-    const loadFailed = useCallback(async () => {
-        try {
-            setFailed([
-                // { code: "CSC2103", name: "Data Structure & Algorithms", credits: 4 },
-            ]);
-        } catch {
-            setFailed([]);
-        }
-    }, [student?.studentId]);
-    useEffect(() => { loadFailed(); }, [loadFailed]);
+    // const [failed, setFailed] = useState([]); // [{code, name, credits}, ...]
+    // const loadFailed = useCallback(async () => {
+    //     try {
+    //         setFailed([
+    //             // { code: "CSC2103", name: "Data Structure & Algorithms", credits: 4 },
+    //         ]);
+    //     } catch {
+    //         setFailed([]);
+    //     }
+    // }, [student?.studentId]);
+    // useEffect(() => { loadFailed(); }, [loadFailed]);
 
     // --- load from DSL (using planPath) ---
     const loadFromAPI = useCallback(async () => {
         setErr(''); setLoading(true);
         try {
-            const data = await fetchSchedule(student.studentId);
-            // derive cohortYear from "2024-01"
+            const [data, attempts] = await Promise.all([
+                fetchSchedule(student.studentId),
+                fetchAttempts(student.studentId),
+            ]);
+
             const cohortYear = Number((data.cohort || '').slice(0,4)) || new Date().getFullYear();
-            const uiPlan = scheduleToPlan(data.schedule || [], cohortYear);
+
+            const passedSet = new Set(
+                (attempts || [])
+                    .filter(a => isPass(a.grade))
+                    .map(a => String(a.subjectCode || '').toUpperCase().trim())
+            );
+            const failedSet = new Set(
+                (attempts || [])
+                    .filter(a => isFail(a.grade))
+                    .map(a => String(a.subjectCode || '').toUpperCase().trim())
+            );
+
+            const uiPlan = scheduleToPlan(data.schedule || [], cohortYear, passedSet, failedSet);
             setPlan(uiPlan);
         } catch (e) {
-            throw e;
+            setErr(e.message || 'Failed to load schedule');
+            setPlan([]);
         } finally {
             setLoading(false);
         }
@@ -221,13 +259,13 @@ const SubjectPlan = ({ student, planPath = "plans/2024-01.dsl", onLogout }) => {
             />
 
             {/* Repeat failed subjects button (will wire full panel later) */}
-            <div style={{ padding: "0 16px 8px" }}>
-                {failed.length > 0 && (
-                    <button onClick={() => setRepeatOpen(true)}>
-                        Repeat failed subjects ({failed.length})
-                    </button>
-                )}
-            </div>
+            {/*<div style={{ padding: "0 16px 8px" }}>*/}
+            {/*    {failed.length > 0 && (*/}
+            {/*        <button onClick={() => setRepeatOpen(true)}>*/}
+            {/*            Repeat failed subjects ({failed.length})*/}
+            {/*        </button>*/}
+            {/*    )}*/}
+            {/*</div>*/}
 
             <div style={{ padding: 16 }}>
                 {loading && <div>Loading plan…</div>}

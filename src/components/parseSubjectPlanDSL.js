@@ -1,10 +1,3 @@
-// Lenient parser for the Subject Plan DSL (https://wookeat.github.io/)
-// - Sem headers: "Sem-1 (YYYY-MM):" or "Sem 1 (YYYY):"
-// - Supports running semester numbers (Sem-4..Sem-9) and normalizes per-year: ((n-1)%3)+1
-// - Core: "! CODE Title [cr]"  (also accepts bare "CODE Title [cr]")
-// - Elective groups: "*|#|? label {N}" then "+ CODE Title [cr]" options
-// - Creates N empty elective slots per group and exposes buckets {bucketId -> options[]}
-
 function normalize(text) {
     return text
         .replace(/\uFEFF/g, '')     // BOM
@@ -137,26 +130,26 @@ export function parseSubjectPlanDSL(text) {
 
             const gIndex = nextGroupIndex(y, currentSem.semLocal);
             const bucketId = `${type}-y${currentSem.year}-s${currentSem.semLocal}-g${gIndex}`;
-            currentGroup = { bucketId };
-            if (!buckets.has(bucketId)) buckets.set(bucketId, []);
-
-            // Create N empty elective slots
-            for (let i = 0; i < required; i++) {
-                semObj.subjects.push({
-                    id: `${bucketId}-slot-${i + 1}`,
-                    code: 'ELECTIVE',
-                    // friendly label from marker type:
-                    name:
-                        type === 'discipline' ? 'Discipline Elective' :
-                        type === 'free'       ? 'Free Elective' :
-                        type === 'mpu'        ? 'MPU' :
-                        'Elective',
-                    credits: null,                 // ← hide credits until chosen
-                    status: 'Planned',
-                    type: 'elective',
-                    bucketId,
-                    slotKind: type
-                });
+            // For MPU groups we do NOT create selectable slots — they are fixed core subjects.
+            if (type === 'mpu') {
+                currentGroup = { bucketId, isMpu: true, required };
+            } else {
+                currentGroup = { bucketId, isMpu: false, required };
+                if (!buckets.has(bucketId)) buckets.set(bucketId, []);
+                // Create N selectable slots only for true electives
+                for (let i = 0; i < required; i++) {
+                    semObj.subjects.push({
+                        id: `${bucketId}-slot-${i + 1}`,
+                        code: 'ELECTIVE',
+                        name: type === 'discipline' ? 'Discipline Elective' :
+                            type === 'free'       ? 'Free Elective' : 'Elective',
+                        credits: null,
+                        status: 'Planned',
+                        type: 'elective',
+                        bucketId,
+                        slotKind: type
+                    });
+                }
             }
             continue;
         }
@@ -165,11 +158,24 @@ export function parseSubjectPlanDSL(text) {
         if (currentGroup && indent >= INDENT * 3 && /^\+\s+/.test(t)) {
             const info = parseModule(t.slice(1));
             if (info) {
-                buckets.get(currentGroup.bucketId).push({
-                    subjectId: info.code,
-                    title: info.title,
-                    credits: info.credits
-                });
+                if (currentGroup.isMpu) {
+                    // MPU option → add directly as a core subject (non-selectable)
+                    semObj.subjects.push({
+                        id: info.code,
+                        code: info.code,
+                        name: info.title,
+                        credits: info.credits,
+                        status: 'Planned',
+                        type: 'core'
+                    });
+                } else {
+                    // True elective option → goes into bucket
+                    buckets.get(currentGroup.bucketId).push({
+                        subjectId: info.code,
+                        title: info.title,
+                        credits: info.credits
+                    });
+                }
             }
             continue;
         }

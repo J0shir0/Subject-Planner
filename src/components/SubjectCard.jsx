@@ -1,5 +1,5 @@
 const SubjectCard = ({ subject, onClear }) => {
-    // keep the whole object, so we can read slotKind etc.
+    // keep the whole object so we can read slotKind etc.
     const { code, name, credits, status, type, slotKind } = subject;
 
     const isElective = type === 'elective';
@@ -12,16 +12,15 @@ const SubjectCard = ({ subject, onClear }) => {
         return 'Elective';
     };
 
-    const kindLabel = isElective
-        ? labelForKind()                      // Discipline / Free / MPU elective
-        : (type === 'MPU' || type === 'mpu')  // fixed MPU subject
-            ? 'MPU'
-            : 'Core';
-
     // Title (top line)
     const titleText = isEmptyElective
         ? `${labelForKind()} - Select an option`
         : `${code} · ${name}`;
+
+    // kind label for non-empty subjects
+    const kindLabel = isElective
+        ? 'Elective'
+        : (type === 'mpu' ? 'MPU' : 'Core');
 
     // Subtitle (second line)
     const subtitleText = isEmptyElective
@@ -47,10 +46,11 @@ const SubjectCard = ({ subject, onClear }) => {
         background: '#121212',
     };
 
-    // empty slots get a dashed, muted look
+    // empty slots get a dashed, muted look (INCLUDING grey left border)
     const emptyElectiveStyle = isEmptyElective ? {
         border: '2px dashed #777',
         borderLeftWidth: 2,       // remove colored stripe emphasis
+        borderLeftColor: '#777',  // ← make the dashed border grey
         color: '#b0b0b0',
         background: '#0e0e0e',
         fontStyle: 'italic',
@@ -68,9 +68,13 @@ const SubjectCard = ({ subject, onClear }) => {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {/* Core subjects: no remove icon */}
+                {/* Core / MPU subjects: no remove icon */}
                 {!isElective && (
-                    <button disabled title="Core subjects cannot be removed" style={{ opacity: 0.3 }} />
+                    <button
+                        disabled
+                        title="Core subjects cannot be removed"
+                        style={{ opacity: 0.3 }}
+                    />
                 )}
                 {/* Empty elective: no clear button */}
                 {isElective && isEmptyElective && (
@@ -78,7 +82,13 @@ const SubjectCard = ({ subject, onClear }) => {
                 )}
                 {/* Chosen elective: show clear */}
                 {isElective && !isEmptyElective && (
-                    <button onClick={onClear} aria-label={`Clear ${name}`} title="Clear elective">X</button>
+                    <button
+                        onClick={onClear}
+                        aria-label={`Clear ${name}`}
+                        title="Clear elective"
+                    >
+                        X
+                    </button>
                 )}
             </div>
         </div>

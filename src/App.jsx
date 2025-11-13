@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import SubjectPlan from "./components/SubjectPlan.jsx";
 import Login from "./components/Login.jsx";
 
+const SESSION_KEY = "planner_student";
+
 function normalizeCohort(raw) {
         if (!raw) return "";
         const t = String(raw).trim();
@@ -14,7 +16,7 @@ export default function App() {
         const [student, setStudent] = useState(null);
 
         useEffect(() => {
-                const raw = localStorage.getItem("planner_student");
+                const raw = sessionStorage.getItem("planner_student");
                 if (raw) {
                         try {
                                 const parsed = JSON.parse(raw);
@@ -31,12 +33,12 @@ export default function App() {
                 // sanitize cohort like "2025-01"
                 const cohort = String(s.cohort || "").trim();
                 const safe = { ...s, cohort };
-                localStorage.setItem("planner_student", JSON.stringify(safe));
+                sessionStorage.setItem("planner_student", JSON.stringify(safe));
                 setStudent(safe);
         };
 
         const handleLogout = () => {
-                localStorage.removeItem("planner_student");
+                sessionStorage.removeItem("planner_student");
                 setStudent(null);
         };
 

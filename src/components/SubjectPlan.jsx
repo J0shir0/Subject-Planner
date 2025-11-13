@@ -54,22 +54,70 @@ function applyAttemptsToPlan(dslPlan, attempts) {
     }));
 }
 
+// merge elective choices / statuses from a saved plan into a fresh base
+function mergeSavedPlan(basePlan, savedRaw) {
+    const savedPlan = Array.isArray(savedRaw)
+        ? savedRaw
+        : (savedRaw && Array.isArray(savedRaw.plan) ? savedRaw.plan : null);
+
+    if (!savedPlan) return basePlan;
+
+    const index = new Map();
+    for (const y of savedPlan) {
+        for (const s of y.semesters || []) {
+            for (const sub of s.subjects || []) {
+                const key = `${y.year}|${s.id}|${sub.id}`;
+                index.set(key, sub);
+            }
+        }
+    }
+
+    return basePlan.map(y => ({
+        ...y,
+        semesters: y.semesters.map(s => ({
+            ...s,
+            subjects: (s.subjects || []).map(sub => {
+                const key = `${y.year}|${s.id}|${sub.id}`;
+                const saved = index.get(key);
+                if (!saved) return sub;
+
+                // keep structure from base, but copy user-specific bits
+                return {
+                    ...sub,
+                    code: saved.code ?? sub.code,
+                    name: saved.name ?? sub.name,
+                    status: saved.status ?? sub.status,
+                    credits: saved.credits ?? sub.credits,
+                };
+            }),
+        })),
+    }));
+}
+
 // --- component -------------------------------------------------------
 
 const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
-    const [plan, setPlan] = useState([]);               // DSL + statuses
+    const [plan, setPlan] = useState([]);               // DSL + statuses (+ electives)
     const [activeSlot, setActiveSlot] = useState(null); // { slotId, bucketId, options? }
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState('');
     const [attemptErr, setAttemptErr] = useState('');
+    // const [dupWarning, setDupWarning] = useState('');
     const bucketsRef = useRef({});                      // bucketId -> options[]
 
     const progress = getProgress(plan);
+
+    // key for localStorage so we remember electives per student+cohort
+    const storageKey =
+        student?.studentId && student?.cohort
+            ? `planner_plan_${student.studentId}_${student.cohort}`
+            : null;
 
     // load DSL + attempts and merge them
     const loadPlanWithStatus = useCallback(async () => {
         setErr('');
         setAttemptErr('');
+        // setDupWarning('');
         setLoading(true);
 
         try {
@@ -116,8 +164,23 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
                 setAttemptErr(`Attempts fetch failed: ${e.message || e}`);
             }
 
-            const merged = applyAttemptsToPlan(parsedPlan, attempts);
-            setPlan(merged);
+            const mergedBase = applyAttemptsToPlan(parsedPlan, attempts);
+
+            // 3) apply any saved electives / manual statuses from localStorage
+            let finalPlan = mergedBase;
+            if (storageKey) {
+                try {
+                    const raw = localStorage.getItem(storageKey);
+                    if (raw) {
+                        const saved = JSON.parse(raw);
+                        finalPlan = mergeSavedPlan(mergedBase, saved);
+                    }
+                } catch (e) {
+                    console.warn('[Planner] Failed to read saved plan', e);
+                }
+            }
+
+            setPlan(finalPlan);
         } catch (e) {
             console.error('[Planner] load plan failed:', e);
             setErr(e.message || 'Plan load failed');
@@ -125,15 +188,21 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
         } finally {
             setLoading(false);
         }
-    }, [planPath, student?.studentId]);
+    }, [planPath, student?.studentId, storageKey]);
 
     useEffect(() => {
         loadPlanWithStatus();
     }, [loadPlanWithStatus]);
 
-    const handleReset = () => {
-        loadPlanWithStatus();
-    };
+    // persist plan whenever it changes
+    useEffect(() => {
+        if (!storageKey || !plan || !plan.length) return;
+        try {
+            localStorage.setItem(storageKey, JSON.stringify(plan));
+        } catch (e) {
+            console.warn('[Planner] Failed to save plan', e);
+        }
+    }, [plan, storageKey]);
 
     // --- subject mutations (manual tweaking still works) --------------
 
@@ -177,68 +246,109 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
     // --- elective panel wiring ---------------------------------------
 
     const openElective = ({ slotId, bucketId }) => {
-        const options = bucketsRef.current[bucketId] || [];
-        setActiveSlot({ slotId, bucketId, options });
+        // Original options from the DSL bucket
+        const allOptions = bucketsRef.current[bucketId] || [];
+
+        // Find the semester that contains this slot
+        let semesterWithSlot = null;
+        for (const y of plan) {
+            for (const s of y.semesters || []) {
+                if (s.subjects?.some(sub => sub.id === slotId)) {
+                    semesterWithSlot = s;
+                    break;
+                }
+            }
+            if (semesterWithSlot) break;
+        }
+
+        // If we somehow don't find the semester, just show all options
+        if (!semesterWithSlot) {
+            setActiveSlot({ slotId, bucketId, options: allOptions });
+            return;
+        }
+
+        // Collect codes already used in this semester for this bucket
+        const usedCodes = new Set(
+            (semesterWithSlot.subjects || [])
+                .filter(sub =>
+                    sub.type === 'elective' &&
+                    sub.bucketId === bucketId &&
+                    sub.id !== slotId &&
+                    sub.code &&
+                    sub.code !== 'ELECTIVE'
+                )
+                .map(sub => String(sub.code).toUpperCase().trim())
+        );
+
+        // Filter out already-used electives from the list
+        const filteredOptions = allOptions.filter(opt => {
+            const c = String(opt.subjectId || '').toUpperCase().trim();
+            return !usedCodes.has(c);
+        });
+
+        if (filteredOptions.length === 0) {
+            if (typeof window !== 'undefined') {
+                window.alert('All electives from this bucket are already used in this semester.');
+            }
+            return;
+        }
+
+        setActiveSlot({ slotId, bucketId, options: filteredOptions });
     };
+
     const closeElective = () => setActiveSlot(null);
 
     const applyElectiveChoice = ({ slotId, subjectId, title, credits }) => {
-        setPlan(prev => {
-            // 1) Find the semester that contains this slot
-            let semOfSlot = null;
+        let hadDuplicate = false;
 
-            for (const year of prev) {
-                for (const sem of year.semesters) {
-                    if (sem.subjects?.some(sub => sub.id === slotId)) {
-                        semOfSlot = sem;
-                        break;
-                    }
-                }
-                if (semOfSlot) break;
-            }
-
-            // If somehow we didn't find it, just keep previous state
-            if (!semOfSlot) {
-                console.warn('[Planner] Could not find semester for slot', slotId);
-                return prev;
-            }
-
-            const targetCode = String(subjectId || '').toUpperCase().trim();
-
-            // 2) Check if this elective is already chosen in this semester
-            const alreadyUsed = semOfSlot.subjects.some(sub =>
-                sub.id !== slotId &&
-                String(sub.code || '').toUpperCase().trim() === targetCode
-            );
-
-            if (alreadyUsed) {
-                // Simple UX for now – no fancy UI, just a guard
-                window.alert('You have already chosen this elective in this semester. Please pick a different subject.');
-                return prev; // do NOT change anything
-            }
-
-            // 3) Safe to apply the change
-            return prev.map(y => ({
+        setPlan(prev =>
+            prev.map(y => ({
                 ...y,
-                semesters: y.semesters.map(s => ({
-                    ...s,
-                    subjects: s.subjects.map(sub => {
-                        if (sub.type === 'elective' && sub.id === slotId) {
-                            return {
-                                ...sub,
-                                code: subjectId,
-                                name: title,
-                                credits: credits ?? sub.credits,
-                            };
-                        }
-                        return sub;
-                    }),
-                })),
-            }));
-        });
+                semesters: y.semesters.map(s => {
+                    const hasSlot = s.subjects.some(sub => sub.id === slotId);
+                    if (!hasSlot) return s;
 
-        // Close the panel only after a successful update
-        closeElective();
+                    const codeUpper = String(subjectId || '').toUpperCase().trim();
+
+                    // Safety check: if something weird happened and we still have a duplicate
+                    const alreadyUsed = s.subjects.some(sub =>
+                        sub.id !== slotId &&
+                        sub.type === 'elective' &&
+                        String(sub.code || '').toUpperCase().trim() === codeUpper
+                    );
+
+                    if (alreadyUsed) {
+                        hadDuplicate = true;
+                        return s; // leave semester unchanged
+                    }
+
+                    return {
+                        ...s,
+                        subjects: s.subjects.map(sub =>
+                            sub.type === 'elective' && sub.id === slotId
+                                ? {
+                                    ...sub,
+                                    code: subjectId,
+                                    name: title,
+                                    credits: credits ?? sub.credits,
+                                }
+                                : sub
+                        ),
+                    };
+                }),
+            }))
+        );
+
+        if (hadDuplicate) {
+            if (typeof window !== 'undefined') {
+                window.alert(
+                    `You have already selected ${subjectId} in this semester. Please pick a different elective.`
+                );
+            }
+            // keep panel open
+        } else {
+            closeElective();
+        }
     };
 
     // --- render -------------------------------------------------------
@@ -249,10 +359,43 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
                 progress={progress}
                 student={student}
                 onLogout={onLogout}
-                onReset={handleReset}
+                // onReset intentionally omitted: choices are persistent now
             />
 
             <div style={{ padding: 16 }}>
+                {/*{dupWarning && (*/}
+                {/*    <div*/}
+                {/*        style={{*/}
+                {/*            color: '#ffb3b3',*/}
+                {/*            background: '#401010',*/}
+                {/*            border: '1px solid #702020',*/}
+                {/*            borderRadius: 6,*/}
+                {/*            padding: '6px 10px',*/}
+                {/*            marginBottom: 8,*/}
+                {/*            display: 'flex',*/}
+                {/*            justifyContent: 'space-between',*/}
+                {/*            alignItems: 'center',*/}
+                {/*            fontSize: 13,*/}
+                {/*        }}*/}
+                {/*    >*/}
+                {/*        <span>{dupWarning}</span>*/}
+                {/*        <button*/}
+                {/*            onClick={() => setDupWarning('')}*/}
+                {/*            style={{*/}
+                {/*                marginLeft: 8,*/}
+                {/*                border: 'none',*/}
+                {/*                background: 'transparent',*/}
+                {/*                color: '#ffb3b3',*/}
+                {/*                cursor: 'pointer',*/}
+                {/*                fontSize: 14,*/}
+                {/*            }}*/}
+                {/*            aria-label="Dismiss duplicate warning"*/}
+                {/*        >*/}
+                {/*            ×*/}
+                {/*        </button>*/}
+                {/*    </div>*/}
+                {/*)}*/}
+
                 {loading && <div>Loading plan…</div>}
                 {err && <div style={{ color: 'salmon', marginBottom: 8 }}>{err}</div>}
                 {attemptErr && (

@@ -28,6 +28,7 @@ function isFail(grade) {
 
 // overlay pass / fail into a DSL plan
 function applyAttemptsToPlan(dslPlan, attempts) {
+
     const passedSet = new Set(
         (attempts || [])
             .filter(a => isPass(a.grade))
@@ -53,6 +54,141 @@ function applyAttemptsToPlan(dslPlan, attempts) {
         })),
     }));
 }
+
+// add extra passed subjects that are not in the DSL plan
+// add extra passed subjects that are not in the DSL plan
+// add extra passed subjects that are not in the DSL plan
+function augmentWithExtraPassedMPUs(plan, attempts) {
+    if (!plan || !attempts) return plan;
+
+    // normalise codes: remove spaces + uppercase
+    const normalizeCode = (code) =>
+        String(code || "")
+            .toUpperCase()
+            .replace(/\s+/g, "")
+            .trim();
+
+    // helper: map exam month to canonical semester month (01, 04, 09)
+    function mapExamToPlanYm(year, rawMonth) {
+        const m = Number(rawMonth);
+        if (!year || !m) return null;
+
+        let semMonth;
+        // Jan / Feb / Mar  → Jan semester
+        if (m === 1 || m === 2 || m === 3) {
+            semMonth = 1;
+        }
+        // Apr..Aug → Apr semester
+        else if (m === 4 || m === 5 || m === 6 || m === 7 || m === 8) {
+            semMonth = 4;
+        }
+        // Sep..Dec → Sep semester
+        else {
+            semMonth = 9;
+        }
+
+        const mm = String(semMonth).padStart(2, "0");
+        return `${year}-${mm}`; // e.g. "2024-01"
+    }
+
+    // 1) collect all codes that already exist in the DSL plan
+    const inPlan = new Set(
+        plan
+            .flatMap((y) => y.semesters)
+            .flatMap((s) => s.subjects || [])
+            .map((sub) => normalizeCode(sub.code))
+    );
+
+    // 2) find extra passed MPU3232 attempts that are NOT already in the plan
+    const extras = (attempts || []).filter((a) => {
+        const codeNorm = normalizeCode(a.subjectCode);
+        if (!codeNorm) return false;
+        if (codeNorm !== "MPU3232") return false;   // matches "MPU3232" or "MPU 3232"
+        if (!isPass(a.grade)) return false;         // only passed
+        if (inPlan.has(codeNorm)) return false;     // already in DSL
+        return true;
+    });
+
+    if (extras.length === 0) return plan;
+
+    // 3) shallow-copy plan so we don't mutate original
+    const next = plan.map((y) => ({
+        ...y,
+        semesters: y.semesters.map((s) => ({
+            ...s,
+            subjects: [...(s.subjects || [])],
+        })),
+    }));
+
+    // 4) place each extra MPU into the correct semester
+    for (const a of extras) {
+        const codeNorm = normalizeCode(a.subjectCode);
+        const title = a.subjectName || "Bahasa Kebangsaan A";
+
+        // *** IMPORTANT: use examYear / examMonth (camelCase) ***
+        const year = Number(a.examYear ?? a.examyear);
+        const month = Number(a.examMonth ?? a.exammonth);
+        if (!year || !month) continue;
+
+        const ymCanonical = mapExamToPlanYm(year, month); // e.g. "2024-01"
+
+        let yearEntry = null;
+        let sem = null;
+
+        if (ymCanonical) {
+            // try to match "Sem X (YYYY-MM)" in the titles
+            yearEntry = next.find((y) =>
+                y.semesters.some(
+                    (s) =>
+                        typeof s.title === "string" &&
+                        s.title.includes(`(${ymCanonical})`)
+                )
+            );
+            if (yearEntry) {
+                sem = yearEntry.semesters.find(
+                    (s) =>
+                        typeof s.title === "string" &&
+                        s.title.includes(`(${ymCanonical})`)
+                );
+            }
+        }
+
+        // fallback: match by year only
+        if (!yearEntry) {
+            yearEntry = next.find((y) => String(y.year) === String(year));
+        }
+        if (!yearEntry) continue;
+
+        if (!sem) {
+            // final fallback: make an "Extra subjects" semester in that year
+            const titleYm = ymCanonical || `${year}`;
+            sem = {
+                id: `extra-${titleYm}`,
+                title: `Extra subjects (${titleYm})`,
+                subjects: [],
+            };
+            yearEntry.semesters.push(sem);
+        }
+
+        // avoid double-inserting if already added
+        const alreadyThere = sem.subjects.some(
+            (sub) => normalizeCode(sub.code) === codeNorm
+        );
+        if (alreadyThere) continue;
+
+        sem.subjects.push({
+            id: codeNorm,
+            code: codeNorm,
+            name: title,
+            credits: null,     // we don't have credits here; fine to leave null
+            status: "Completed",
+            type: "mpu",       // SubjectCard will label this as "MPU"
+        });
+    }
+
+    return next;
+}
+
 
 // merge elective choices / statuses from a saved plan into a fresh base
 function mergeSavedPlan(basePlan, savedRaw) {
@@ -164,9 +300,11 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
                 setAttemptErr(`Attempts fetch failed: ${e.message || e}`);
             }
 
-            const mergedBase = applyAttemptsToPlan(parsedPlan, attempts);
+            // overlay attempts + extra MPUs
+            const merged = applyAttemptsToPlan(parsedPlan, attempts);
+            const mergedBase = augmentWithExtraPassedMPUs(merged, attempts);
 
-            // 3) apply any saved electives / manual statuses from localStorage
+            // apply any saved electives / manual statuses from localStorage
             let finalPlan = mergedBase;
             if (storageKey) {
                 try {
@@ -181,6 +319,7 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
             }
 
             setPlan(finalPlan);
+
         } catch (e) {
             console.error('[Planner] load plan failed:', e);
             setErr(e.message || 'Plan load failed');

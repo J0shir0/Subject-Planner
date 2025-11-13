@@ -12,6 +12,12 @@ const SubjectCard = ({ subject, onClear }) => {
         return 'Elective';
     };
 
+    const kindLabel = isElective
+        ? labelForKind()                      // Discipline / Free / MPU elective
+        : (type === 'MPU' || type === 'mpu')  // fixed MPU subject
+            ? 'MPU'
+            : 'Core';
+
     // Title (top line)
     const titleText = isEmptyElective
         ? `${labelForKind()} - Select an option`
@@ -20,7 +26,7 @@ const SubjectCard = ({ subject, onClear }) => {
     // Subtitle (second line)
     const subtitleText = isEmptyElective
         ? `${labelForKind()} • ${status}` // no credits for empty slot
-        : `${credits ?? ''}${credits ? ' credits • ' : ''}${isElective ? 'Elective' : 'Core'} • ${status}`;
+        : `${credits ?? ''}${credits ? ' credits • ' : ''}${kindLabel} • ${status}`;
 
     const borderColor =
         status === 'Completed'   ? 'green'      :

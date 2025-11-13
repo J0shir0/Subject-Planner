@@ -166,7 +166,7 @@ export function parseSubjectPlanDSL(text) {
                         name: info.title,
                         credits: info.credits,
                         status: 'Planned',
-                        type: 'core'
+                        type: 'mpu'
                     });
                 } else {
                     // True elective option → goes into bucket

@@ -183,23 +183,61 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
     const closeElective = () => setActiveSlot(null);
 
     const applyElectiveChoice = ({ slotId, subjectId, title, credits }) => {
-        setPlan(prev => prev.map(y => ({
-            ...y,
-            semesters: y.semesters.map(s => ({
-                ...s,
-                subjects: s.subjects.map(sub => {
-                    if (sub.type === 'elective' && sub.id === slotId) {
-                        return {
-                            ...sub,
-                            code: subjectId,
-                            name: title,
-                            credits: credits ?? sub.credits,
-                        };
+        setPlan(prev => {
+            // 1) Find the semester that contains this slot
+            let semOfSlot = null;
+
+            for (const year of prev) {
+                for (const sem of year.semesters) {
+                    if (sem.subjects?.some(sub => sub.id === slotId)) {
+                        semOfSlot = sem;
+                        break;
                     }
-                    return sub;
-                }),
-            })),
-        })));
+                }
+                if (semOfSlot) break;
+            }
+
+            // If somehow we didn't find it, just keep previous state
+            if (!semOfSlot) {
+                console.warn('[Planner] Could not find semester for slot', slotId);
+                return prev;
+            }
+
+            const targetCode = String(subjectId || '').toUpperCase().trim();
+
+            // 2) Check if this elective is already chosen in this semester
+            const alreadyUsed = semOfSlot.subjects.some(sub =>
+                sub.id !== slotId &&
+                String(sub.code || '').toUpperCase().trim() === targetCode
+            );
+
+            if (alreadyUsed) {
+                // Simple UX for now – no fancy UI, just a guard
+                window.alert('You have already chosen this elective in this semester. Please pick a different subject.');
+                return prev; // do NOT change anything
+            }
+
+            // 3) Safe to apply the change
+            return prev.map(y => ({
+                ...y,
+                semesters: y.semesters.map(s => ({
+                    ...s,
+                    subjects: s.subjects.map(sub => {
+                        if (sub.type === 'elective' && sub.id === slotId) {
+                            return {
+                                ...sub,
+                                code: subjectId,
+                                name: title,
+                                credits: credits ?? sub.credits,
+                            };
+                        }
+                        return sub;
+                    }),
+                })),
+            }));
+        });
+
+        // Close the panel only after a successful update
         closeElective();
     };
 

@@ -107,6 +107,7 @@ const SemesterColumn = ({
                                 {isElectiveSlot && subject.bucketId && (
                                     <div style={{ marginTop: 6 }}>
                                         <button
+                                            className="app-button"
                                             onClick={() =>
                                                 onOpenElective?.({
                                                     slotId: subject.id,

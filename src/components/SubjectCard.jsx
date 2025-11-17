@@ -1,5 +1,5 @@
 const SubjectCard = ({ subject, onClear }) => {
-    // keep the whole object so we can read slotKind etc.
+    // keep the whole object, so we can read slotKind etc.
     const { code, name, credits, status, type, slotKind } = subject;
 
     const isElective = type === 'elective';
@@ -27,14 +27,16 @@ const SubjectCard = ({ subject, onClear }) => {
         ? `${labelForKind()} • ${status}` // no credits for empty slot
         : `${credits ?? ''}${credits ? ' credits • ' : ''}${kindLabel} • ${status}`;
 
+    // coloured left stripe (this can stay constant across themes)
     const borderColor =
-        status === 'Completed'   ? 'green'      :
-            status === 'In Progress' ? 'orange'     :
-                status === 'TBD'         ? 'gray'       :
+        status === 'Completed'     ? 'green'      :
+            status === 'In Progress'   ? 'orange'     :
+                status === 'TBD'           ? 'gray'       :
                     'dodgerblue';
 
+    // main card appearance – now uses theme variables
     const baseStyle = {
-        border: '1px solid #444',
+        border: '1px solid var(--border-soft)',
         borderLeftWidth: 6,
         borderLeftColor: borderColor,
         borderRadius: 8,
@@ -43,21 +45,23 @@ const SubjectCard = ({ subject, onClear }) => {
         justifyContent: 'space-between',
         alignItems: 'center',
         gap: 8,
-        background: '#121212',
+        background: 'var(--bg-card)',
+        color: 'var(--text-main)',
+        transition: 'background 0.15s ease, transform 0.1s ease, box-shadow 0.1s ease, border-color 0.15s ease',
     };
 
     // empty slots get a dashed, muted look (INCLUDING grey left border)
     const emptyElectiveStyle = isEmptyElective ? {
-        border: '2px dashed #777',
-        borderLeftWidth: 2,       // remove colored stripe emphasis
-        borderLeftColor: '#777',  // ← make the dashed border grey
-        color: '#b0b0b0',
-        background: '#0e0e0e',
+        border: '2px dashed var(--border-soft)',
+        borderLeftWidth: 2,                    // remove coloured stripe emphasis
+        borderLeftColor: 'var(--border-soft)', // grey dashed border
+        color: 'var(--text-muted)',
+        background: 'var(--bg-card)',
         fontStyle: 'italic',
     } : null;
 
     return (
-        <div style={{ ...baseStyle, ...(emptyElectiveStyle || {}) }}>
+        <div className="subject-card" style={{ ...baseStyle, ...(emptyElectiveStyle || {}) }}>
             <div>
                 <div style={{ fontWeight: 600 }}>
                     {titleText}
@@ -73,21 +77,24 @@ const SubjectCard = ({ subject, onClear }) => {
                     <button
                         disabled
                         title="Core subjects cannot be removed"
-                        style={{ opacity: 0.3 }}
+                        style={{ opacity: 0.3, border: 'none', background: 'transparent' }}
                     />
                 )}
+
                 {/* Empty elective: no clear button */}
                 {isElective && isEmptyElective && (
                     <span style={{ opacity: 0.6, fontSize: 12 }}>&nbsp;</span>
                 )}
+
                 {/* Chosen elective: show clear */}
                 {isElective && !isEmptyElective && (
                     <button
                         onClick={onClear}
                         aria-label={`Clear ${name}`}
+                        className="app-button icon-button"
                         title="Clear elective"
                     >
-                        X
+                        ×
                     </button>
                 )}
             </div>

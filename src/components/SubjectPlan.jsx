@@ -238,6 +238,11 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState('');
     const [attemptErr, setAttemptErr] = useState('');
+    const [theme, setTheme] = useState(() => {
+        if (typeof window === 'undefined') return 'dark';
+        const saved = window.localStorage.getItem('planner_theme');
+        return saved === 'light' ? 'light' : 'dark';
+    });
     // const [dupWarning, setDupWarning] = useState('');
     const bucketsRef = useRef({});                      // bucketId -> options[]
 
@@ -328,6 +333,20 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
             setLoading(false);
         }
     }, [planPath, student?.studentId, storageKey]);
+
+    useEffect(() => {
+        if (typeof document !== 'undefined') {
+            document.body.classList.remove('theme-dark', 'theme-light');
+            document.body.classList.add(theme === 'light' ? 'theme-light' : 'theme-dark');
+        }
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem('planner_theme', theme);
+        }
+    }, [theme]);
+
+    const toggleTheme = () => {
+        setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+    };
 
     useEffect(() => {
         loadPlanWithStatus();
@@ -493,15 +512,18 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
     // --- render -------------------------------------------------------
 
     return (
-        <div style={{ minHeight: '100vh', background: '#0b0b0b', color: '#eee' }}>
+        <div className="app-shell" style={{minHeight: '100vh'}}>
             <TopBar
                 progress={progress}
                 student={student}
                 onLogout={onLogout}
+                theme={theme}
+                onToggleTheme={toggleTheme}
                 // onReset intentionally omitted: choices are persistent now
             />
 
-            <div style={{ padding: 16 }}>
+            <div style={{padding: 16}}>
+
                 {/*{dupWarning && (*/}
                 {/*    <div*/}
                 {/*        style={{*/}
@@ -536,18 +558,18 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
                 {/*)}*/}
 
                 {loading && <div>Loading plan…</div>}
-                {err && <div style={{ color: 'salmon', marginBottom: 8 }}>{err}</div>}
+                {err && <div style={{color: 'salmon', marginBottom: 8}}>{err}</div>}
                 {attemptErr && (
-                    <div style={{ color: 'salmon', marginBottom: 8 }}>{attemptErr}</div>
+                    <div style={{color: 'salmon', marginBottom: 8}}>{attemptErr}</div>
                 )}
 
                 {plan.length === 0 && !loading && !err && (
-                    <div style={{ opacity: 0.8 }}>
+                    <div style={{opacity: 0.8}}>
                         No plan loaded. Check cohort file: <code>{planPath}</code>
                     </div>
                 )}
 
-                {plan.map(({ year, semesters }) => (
+                {plan.map(({year, semesters}) => (
                     <YearSection
                         key={year}
                         year={year}

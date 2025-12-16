@@ -4,7 +4,7 @@ body {
   @apply bg-white;
 }
 
-/* ==== THEME VARIABLES (used later too) ==== */
+/* ==== THEME VARIABLES  ==== */
 body.theme-dark {
   --bg: #0b0b0b;
   --bg-card: #131313;

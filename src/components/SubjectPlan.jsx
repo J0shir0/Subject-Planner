@@ -58,15 +58,23 @@ function applyAttemptsToPlan(dslPlan, attempts) {
 // add extra passed subjects that are not in the DSL plan
 // add extra passed subjects that are not in the DSL plan
 // add extra passed subjects that are not in the DSL plan
+
+const normalizeCode = (code) =>
+    String(code || "")
+        .toUpperCase()
+        .replace(/\s+/g, "")
+        .trim();
+
+const normalizeTitle = (title) =>
+    String(title || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "")
+        .trim();
+
+
+// add extra passed BKA-type MPUs that are not in the DSL plan
 function augmentWithExtraPassedMPUs(plan, attempts) {
     if (!plan || !attempts) return plan;
-
-    // normalise codes: remove spaces + uppercase
-    const normalizeCode = (code) =>
-        String(code || "")
-            .toUpperCase()
-            .replace(/\s+/g, "")
-            .trim();
 
     // helper: map exam month to canonical semester month (01, 04, 09)
     function mapExamToPlanYm(year, rawMonth) {
@@ -74,22 +82,18 @@ function augmentWithExtraPassedMPUs(plan, attempts) {
         if (!year || !m) return null;
 
         let semMonth;
-        // Jan / Feb / Mar  → Jan semester
         if (m === 1 || m === 2 || m === 3) {
-            semMonth = 1;
-        }
-        // Apr..Aug → Apr semester
-        else if (m === 4 || m === 5 || m === 6 || m === 7 || m === 8) {
-            semMonth = 4;
-        }
-        // Sep..Dec → Sep semester
-        else {
-            semMonth = 9;
+            semMonth = 1;            // Jan semester
+        } else if (m >= 4 && m <= 8) {
+            semMonth = 4;            // Apr semester
+        } else {
+            semMonth = 9;            // Sep semester
         }
 
         const mm = String(semMonth).padStart(2, "0");
-        return `${year}-${mm}`; // e.g. "2024-01"
+        return `${year}-${mm}`;      // e.g. "2024-01"
     }
+
 
     // 1) collect all codes that already exist in the DSL plan
     const inPlan = new Set(
@@ -99,11 +103,17 @@ function augmentWithExtraPassedMPUs(plan, attempts) {
             .map((sub) => normalizeCode(sub.code))
     );
 
-    // 2) find extra passed MPU3232 attempts that are NOT already in the plan
+    // 2) find extra passed BKA attempts NOT already in the plan
     const extras = (attempts || []).filter((a) => {
         const codeNorm = normalizeCode(a.subjectCode);
         if (!codeNorm) return false;
-        if (codeNorm !== "MPU3232") return false;   // matches "MPU3232" or "MPU 3232"
+
+        // special BKA codes: new (MPU3232) and old (MU22113)
+        const isBka =
+            codeNorm === "MPU3232" ||
+            codeNorm === "MU22113";
+
+        if (!isBka) return false;
         if (!isPass(a.grade)) return false;         // only passed
         if (inPlan.has(codeNorm)) return false;     // already in DSL
         return true;
@@ -120,23 +130,21 @@ function augmentWithExtraPassedMPUs(plan, attempts) {
         })),
     }));
 
-    // 4) place each extra MPU into the correct semester
+    // 4) place each extra BKA into the correct semester
     for (const a of extras) {
         const codeNorm = normalizeCode(a.subjectCode);
         const title = a.subjectName || "Bahasa Kebangsaan A";
 
-        // *** IMPORTANT: use examYear / examMonth (camelCase) ***
         const year = Number(a.examYear ?? a.examyear);
         const month = Number(a.examMonth ?? a.exammonth);
         if (!year || !month) continue;
 
-        const ymCanonical = mapExamToPlanYm(year, month); // e.g. "2024-01"
+        const ymCanonical = mapExamToPlanYm(year, month); // e.g. "2023-01"
 
         let yearEntry = null;
         let sem = null;
 
         if (ymCanonical) {
-            // try to match "Sem X (YYYY-MM)" in the titles
             yearEntry = next.find((y) =>
                 y.semesters.some(
                     (s) =>
@@ -160,7 +168,6 @@ function augmentWithExtraPassedMPUs(plan, attempts) {
         if (!yearEntry) continue;
 
         if (!sem) {
-            // final fallback: make an "Extra subjects" semester in that year
             const titleYm = ymCanonical || `${year}`;
             sem = {
                 id: `extra-${titleYm}`,
@@ -180,14 +187,95 @@ function augmentWithExtraPassedMPUs(plan, attempts) {
             id: codeNorm,
             code: codeNorm,
             name: title,
-            credits: null,     // we don't have credits here; fine to leave null
+            credits: null,
             status: "Completed",
-            type: "mpu",       // SubjectCard will label this as "MPU"
+            type: "mpu",     // shows as MPU in card
         });
     }
 
     return next;
 }
+
+function autoFillElectivesFromAttempts(plan, attempts, bucketsObj) {
+    if (!plan || !attempts || !bucketsObj) return plan;
+
+    // All passed attempts (normalised)
+    const passedAttempts = (attempts || [])
+        .filter(a => isPass(a.grade))
+        .map((a, index) => ({
+            index,
+            codeNorm: normalizeCode(a.subjectCode),
+            titleNorm: normalizeTitle(a.subjectName),
+            raw: a,
+        }));
+
+    if (!passedAttempts.length) return plan;
+
+    // Bucket options with normalised code + title
+    const bucketOptions = {};
+    Object.entries(bucketsObj).forEach(([bucketId, opts]) => {
+        bucketOptions[bucketId] = (opts || []).map(opt => ({
+            ...opt,
+            codeNorm: normalizeCode(opt.subjectId),
+            titleNorm: normalizeTitle(opt.title),
+        }));
+    });
+
+    const usedAttemptIdx = new Set();
+
+    const next = plan.map(y => ({
+        ...y,
+        semesters: y.semesters.map(s => ({
+            ...s,
+            subjects: (s.subjects || []).map(sub => {
+                if (sub.type !== 'elective') return sub;
+
+                const isEmpty =
+                    sub.code === 'ELECTIVE' ||
+                    /TBD/i.test(sub.name || '');
+
+                if (!isEmpty) return sub;
+
+                const options = bucketOptions[sub.bucketId] || [];
+                if (!options.length) return sub;
+
+                let matchOpt = null;
+                let matchAttemptIdx = null;
+
+                // Find a passed attempt that matches by code OR by title
+                for (const opt of options) {
+                    const attempt = passedAttempts.find(a =>
+                        !usedAttemptIdx.has(a.index) &&
+                        (
+                            a.codeNorm === opt.codeNorm ||
+                            (opt.titleNorm && a.titleNorm === opt.titleNorm)
+                        )
+                    );
+                    if (attempt) {
+                        matchOpt = opt;
+                        matchAttemptIdx = attempt.index;
+                        break;
+                    }
+                }
+
+                if (!matchOpt) return sub;
+
+                usedAttemptIdx.add(matchAttemptIdx);
+
+                return {
+                    ...sub,
+                    code: matchOpt.subjectId,
+                    name: matchOpt.title,
+                    credits: matchOpt.credits ?? sub.credits,
+                    status: 'Completed',
+                };
+            }),
+        })),
+    }));
+
+    return next;
+}
+
 
 
 // merge elective choices / statuses from a saved plan into a fresh base
@@ -217,7 +305,21 @@ function mergeSavedPlan(basePlan, savedRaw) {
                 const saved = index.get(key);
                 if (!saved) return sub;
 
-                // keep structure from base, but copy user-specific bits
+                const savedIsEmptyElective =
+                    saved.type === 'elective' &&
+                    (saved.code === 'ELECTIVE' || /TBD/i.test(saved.name || ''));
+
+                const baseIsCompletedElective =
+                    sub.type === 'elective' &&
+                    sub.status === 'Completed' &&
+                    sub.code &&
+                    sub.code !== 'ELECTIVE';
+
+                // If we auto-filled a completed elective, don't let an old "empty" save wipe it.
+                if (savedIsEmptyElective && baseIsCompletedElective) {
+                    return sub;
+                }
+
                 return {
                     ...sub,
                     code: saved.code ?? sub.code,
@@ -229,6 +331,7 @@ function mergeSavedPlan(basePlan, savedRaw) {
         })),
     }));
 }
+
 
 // --- component -------------------------------------------------------
 
@@ -309,14 +412,21 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
             const merged = applyAttemptsToPlan(parsedPlan, attempts);
             const mergedBase = augmentWithExtraPassedMPUs(merged, attempts);
 
+            // autofill elective slots from passed attempts (for older cohorts)
+            const prefilled = autoFillElectivesFromAttempts(
+                mergedBase,
+                attempts,
+                buckets
+            );
+
             // apply any saved electives / manual statuses from localStorage
-            let finalPlan = mergedBase;
+            let finalPlan = prefilled;
             if (storageKey) {
                 try {
                     const raw = localStorage.getItem(storageKey);
                     if (raw) {
                         const saved = JSON.parse(raw);
-                        finalPlan = mergeSavedPlan(mergedBase, saved);
+                        finalPlan = mergeSavedPlan(prefilled, saved);
                     }
                 } catch (e) {
                     console.warn('[Planner] Failed to read saved plan', e);
@@ -587,6 +697,7 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
                     slot={activeSlot}
                     onClose={closeElective}
                     onChoose={applyElectiveChoice}
+                    thrmr={theme}
                 />
             )}
         </div>

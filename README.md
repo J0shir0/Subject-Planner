@@ -1,12 +1,75 @@
-# React + Vite
+# Subject Planning and Semester Management System
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This repository contains a full-stack web application developed as a capstone project for Sunway University. The system allows students to visualise their academic structure and interactively plan future subjects, with a focus on usability, clarity, and interactivity.
 
-Currently, two official plugins are available:
+The project integrates a ReactJS frontend, an ExpressJS backend, and an Apache Cassandra database to combine official programme cohort structures with real (anonymised) student subject attempts.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+---
 
-## Expanding the ESLint configuration
+## Project Overview
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Traditional subject planning is often carried out using static documents such as PDFs or spreadsheets, which provide limited interactivity and feedback. This project addresses that limitation by providing an interactive subject planning tool that visually represents a student’s academic journey across semesters and supports elective selection through direct manipulation.
+
+Programme structures are defined using a custom Domain-Structured Language (DSL) format, which is parsed by the frontend to reconstruct the full degree layout. The backend retrieves real student subject attempts from Apache Cassandra, allowing the system to reflect completed and remaining subjects accurately.
+
+---
+
+## Key Features
+
+- Year–semester based academic layout
+- Visual subject cards with progress indication
+- Interactive elective selection panel
+- Drag-and-drop placement for elective subjects
+- Overall academic progress visualisation
+- Simple login using anonymised student credentials
+- Evaluated using the System Usability Scale (SUS)
+
+---
+
+## Technologies Used
+
+**Frontend**
+- ReactJS
+- JavaScript
+- Tailwind CSS
+- Vite
+
+**Backend**
+- Node.js
+- ExpressJS
+
+**Database**
+- Apache Cassandra
+
+**Other Tools**
+- Custom DSL parser (frontend)
+- IntelliJ IDEA Ultimate (development environment)
+- npm (package management)
+
+---
+
+## Installation and Usage
+
+### 1. Clone the repository
+
+bash
+git clone https://github.com/J0shir0/Subject-Planner.git
+cd Subject-Planner
+
+### 2. Install frontend dependencies
+npm install
+
+### 3. Start the backend server
+cd server
+npm install
+node index.js
+
+### 4. Start the frontend
+npm run dev
+
+Note: Apache Cassandra must be configured and running for the backend to retrieve real student subject attempts.
+
+---
+
+Evaluation:
+The system was evaluated using the System Usability Scale (SUS) with Sunway University students. Results indicated that the planner was generally perceived as intuitive and easy to use, particularly due to its clear layout, drag-and-drop interactions, and visual progress indicators.

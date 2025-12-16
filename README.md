@@ -71,5 +71,5 @@ Note: Apache Cassandra must be configured and running for the backend to retriev
 
 ---
 
-Evaluation:
+## Evaluation
 The system was evaluated using the System Usability Scale (SUS) with Sunway University students. Results indicated that the planner was generally perceived as intuitive and easy to use, particularly due to its clear layout, drag-and-drop interactions, and visual progress indicators.

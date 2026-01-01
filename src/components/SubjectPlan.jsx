@@ -5,6 +5,7 @@ import ElectivePanel from './ElectivePanel.jsx';
 import { parseSubjectPlanDSL } from './parseSubjectPlanDSL.js';
 import { fetchAttempts } from '../web/apiClient.js';
 
+
 const getProgress = (plan) => {
     const all = (plan || []).flatMap(y => y.semesters).flatMap(s => s.subjects || []);
     const total = all.length || 0;
@@ -25,20 +26,12 @@ function isFail(grade) {
 }
 
 // --- SAFE SORT HELPER ---
-// Extracts "202501" from "Sem 1 (2025-01)" safely
 const getSemesterDateValue = (semObj) => {
-    // 1. Safety check: Try 'name', then 'title', then empty string
     const nameStr = semObj.name || semObj.title || "";
-
-    // 2. Try to find the date pattern (YYYY-MM)
     const match = nameStr.match(/\((\d{4})-(\d{2})\)/);
-
-    // 3. If found, return numeric value (e.g. 202501)
     if (match) {
         return parseInt(match[1]) * 100 + parseInt(match[2]);
     }
-
-    // 4. Fallback: If no date, put it at the end (999999)
     return 999999;
 };
 
@@ -46,9 +39,7 @@ const getSemesterDateValue = (semObj) => {
 function applyAttemptsToPlan(dslPlan, attempts) {
     if (!attempts || attempts.length === 0) return dslPlan;
 
-    // 1. Group attempts by their Clean Subject Code
     const attemptsBySubject = new Map();
-
     attempts.forEach(a => {
         const cleanCode = normalizeCode(a.subjectCode);
         if (!attemptsBySubject.has(cleanCode)) {
@@ -57,19 +48,15 @@ function applyAttemptsToPlan(dslPlan, attempts) {
         attemptsBySubject.get(cleanCode).push(a);
     });
 
-    // 2. Determine Final Status for each subject based on the LATEST attempt
     const finalStatusMap = new Map();
-
     attemptsBySubject.forEach((list, code) => {
         list.sort((a, b) => {
             const yA = Number(a.examYear || 0);
             const yB = Number(b.examYear || 0);
             if (yA !== yB) return yA - yB;
-
             const mA = Number(a.examMonth || 0);
             const mB = Number(b.examMonth || 0);
             if (mA !== mB) return mA - mB;
-
             const getWeight = (s) => {
                 const stat = String(s || '').toUpperCase();
                 if (stat.includes('RP')) return 3;
@@ -82,7 +69,6 @@ function applyAttemptsToPlan(dslPlan, attempts) {
         const latest = list[list.length - 1];
         const rawGrade = String(latest.grade || '').toUpperCase();
         const cleanGrade = rawGrade.replace(/[^A-Z0-9+\-]/g, '').trim();
-
         const passingGrades = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "P", "EX"];
 
         if (passingGrades.includes(cleanGrade)) {
@@ -92,7 +78,6 @@ function applyAttemptsToPlan(dslPlan, attempts) {
         }
     });
 
-    // 3. Apply to Plan
     return (dslPlan || []).map(y => ({
         ...y,
         semesters: y.semesters.map(s => ({
@@ -122,8 +107,6 @@ const normalizeTitle = (title) =>
         .replace(/[^a-z0-9]+/g, "")
         .trim();
 
-
-// add extra passed BKA-type MPUs that are not in the DSL plan
 function augmentWithExtraPassedMPUs(plan, attempts) {
     if (!plan || !attempts) return plan;
 
@@ -132,7 +115,6 @@ function augmentWithExtraPassedMPUs(plan, attempts) {
         if (!year || !m) return null;
         let semYear = year;
         let semMonth;
-
         if (m === 1) {
             semMonth = 9;
             semYear = year - 1;
@@ -176,7 +158,6 @@ function augmentWithExtraPassedMPUs(plan, attempts) {
     for (const a of extras) {
         const codeNorm = normalizeCode(a.subjectCode);
         const title = a.subjectName || "Bahasa Kebangsaan A";
-
         const year = Number(a.examYear ?? a.examyear);
         const month = Number(a.examMonth ?? a.exammonth);
         if (!year || !month) continue;
@@ -207,7 +188,7 @@ function augmentWithExtraPassedMPUs(plan, attempts) {
             const titleYm = ymCanonical || `${year}`;
             sem = {
                 id: `extra-${titleYm}`,
-                title: `Extra subjects (${titleYm})`, // Uses 'title' here
+                title: `Extra subjects (${titleYm})`,
                 subjects: [],
             };
             yearEntry.semesters.push(sem);
@@ -255,7 +236,6 @@ function autoFillElectivesFromAttempts(plan, attempts, bucketsObj) {
     });
 
     const usedAttemptIdx = new Set();
-
     const next = plan.map(y => ({
         ...y,
         semesters: y.semesters.map(s => ({
@@ -309,7 +289,6 @@ function mergeSavedPlan(basePlan, savedRaw) {
         : (savedRaw && Array.isArray(savedRaw.plan) ? savedRaw.plan : null);
 
     if (!savedPlan) return basePlan;
-
     const index = new Map();
     for (const y of savedPlan) {
         for (const s of y.semesters || []) {
@@ -499,8 +478,8 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
         setPlan(prev => prev.map(y => ({
             ...y,
             semesters: y.semesters.map(s => {
-                // IMPORTANT: Since we are filtering semesters in the UI, we must match by ID, not index.
-                if (s.id !== semesterId && s.name !== semesterId) return s;
+                // IMPORTANT: Match by ID OR by Name (because we renamed the semesters in UI)
+                if (s.id !== semesterId && s.name !== semesterId && s.title !== semesterId) return s;
                 return {
                     ...s,
                     subjects: s.subjects.map(sub => {
@@ -615,6 +594,10 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
         }
     };
 
+    // --- RENDER LOGIC ---
+    // GLOBAL COUNTER for sequential semesters (1, 2, 3, 4...)
+    let globalSemCount = 1;
+
     return (
         <div className="app-shell" style={{minHeight: '100vh'}}>
             <TopBar
@@ -644,7 +627,7 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
                         s.subjects && s.subjects.length > 0
                     );
 
-                    // 2. SORT: Sort by the date inside the brackets (2025-01) safely
+                    // 2. SORT: Sort by the date inside the brackets (2025-01)
                     const sortedSemesters = activeSemesters.sort((a, b) => {
                         return getSemesterDateValue(a) - getSemesterDateValue(b);
                     });
@@ -652,11 +635,32 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
                     // 3. HIDE EMPTY YEARS
                     if (sortedSemesters.length === 0) return null;
 
+                    // 4. RENAME: Apply sequential numbering (Sem 1, Sem 2, Sem 3...)
+                    // irrespective of what year it is.
+                    const renamedSemesters = sortedSemesters.map(sem => {
+                        const originalName = sem.name || sem.title || "";
+                        // Extract date part like (2024-04)
+                        const dateMatch = originalName.match(/\(\d{4}-\d{2}\)/);
+                        const dateSuffix = dateMatch ? dateMatch[0] : "";
+
+                        // New Title: "Sem X (YYYY-MM)"
+                        const newTitle = `Sem ${globalSemCount} ${dateSuffix}`;
+
+                        // Increment global counter
+                        globalSemCount++;
+
+                        return {
+                            ...sem,
+                            name: newTitle,   // Update name for UI
+                            title: newTitle   // Update title just in case
+                        };
+                    });
+
                     return (
                         <YearSection
                             key={year}
                             year={year}
-                            semesters={sortedSemesters}
+                            semesters={renamedSemesters} // Pass the RENAMED list
                             onOpenElective={openElective}
                             onChangeStatus={handleChangeStatus}
                             onClearElective={handleClearElective}

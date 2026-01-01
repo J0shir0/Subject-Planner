@@ -5,6 +5,7 @@ const SubjectCard = ({ subject, onClear }) => {
     const isElective = type === 'elective';
     const isEmptyElective = isElective && (code === 'ELECTIVE' || /TBD/i.test(name));
 
+    // Helper to determine the specific text (Discipline vs Free)
     const labelForKind = () => {
         if (slotKind === 'discipline') return 'Discipline Elective';
         if (slotKind === 'free')       return 'Free Elective';
@@ -12,29 +13,51 @@ const SubjectCard = ({ subject, onClear }) => {
         return 'Elective';
     };
 
+    // Helper for Badge Styling (To make them look distinct)
+    const getBadgeStyle = () => {
+        if (!isElective) return {};
+        // Distinct colors for Discipline vs Free
+        if (slotKind === 'discipline') {
+            return {
+                background: 'rgba(65, 105, 225, 0.15)', // RoyalBlue tint
+                color: 'royalblue',
+                padding: '2px 6px',
+                borderRadius: 4,
+                fontWeight: 600,
+                fontSize: '0.9em'
+            };
+        }
+        if (slotKind === 'free') {
+            return {
+                background: 'rgba(218, 165, 32, 0.15)', // GoldenRod tint
+                color: 'goldenrod',
+                padding: '2px 6px',
+                borderRadius: 4,
+                fontWeight: 600,
+                fontSize: '0.9em'
+            };
+        }
+        return {}; // Default elective
+    };
+
     // Title (top line)
     const titleText = isEmptyElective
         ? `${labelForKind()} - Select an option`
         : `${code} · ${name}`;
 
-    // kind label for non-empty subjects
-    const kindLabel = isElective
-        ? 'Elective'
-        : (type === 'mpu' ? 'MPU' : 'Core');
+    // Subtitle (second line) construction
+    // We render the badge separately in the JSX now for better styling control
+    const creditsPart = isEmptyElective ? '' : `${credits ?? ''}${credits ? ' credits' : ''}`;
+    const statusPart = ` • ${status}`;
 
-    // Subtitle (second line)
-    const subtitleText = isEmptyElective
-        ? `${labelForKind()} • ${status}` // no credits for empty slot
-        : `${credits ?? ''}${credits ? ' credits • ' : ''}${kindLabel} • ${status}`;
-
-    // coloured left stripe (this can stay constant across themes)
+    // coloured left stripe
     const borderColor =
         status === 'Completed'     ? 'green'      :
-            status === 'In Progress'   ? 'orange'     :
-                status === 'TBD'           ? 'gray'       :
-                    'dodgerblue';
+        status === 'Failed'        ? 'red'    :
+        status === 'In Progress'   ? 'orange'     :
+        status === 'TBD'           ? 'gray'       :
+        'dodgerblue';
 
-    // main card appearance – now uses theme variables
     const baseStyle = {
         border: '1px solid var(--border-soft)',
         borderLeftWidth: 6,
@@ -50,11 +73,10 @@ const SubjectCard = ({ subject, onClear }) => {
         transition: 'background 0.15s ease, transform 0.1s ease, box-shadow 0.1s ease, border-color 0.15s ease',
     };
 
-    // empty slots get a dashed, muted look (INCLUDING grey left border)
     const emptyElectiveStyle = isEmptyElective ? {
         border: '2px dashed var(--border-soft)',
-        borderLeftWidth: 2,                    // remove coloured stripe emphasis
-        borderLeftColor: 'var(--border-soft)', // grey dashed border
+        borderLeftWidth: 2,
+        borderLeftColor: 'var(--border-soft)',
         color: 'var(--text-muted)',
         background: 'var(--bg-card)',
         fontStyle: 'italic',
@@ -66,8 +88,23 @@ const SubjectCard = ({ subject, onClear }) => {
                 <div style={{ fontWeight: 600 }}>
                     {titleText}
                 </div>
-                <div style={{ fontSize: 12, opacity: 0.8 }}>
-                    {subtitleText}
+                <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+
+                    {/* Part 1: Credits */}
+                    {creditsPart && <span>{creditsPart}</span>}
+
+                    {/* Part 2: The TYPE Badge (Core, MPU, or specific Elective) */}
+                    {isElective ? (
+                        <span style={getBadgeStyle()}>
+                            {labelForKind()}
+                        </span>
+                    ) : (
+                        <span>• {type === 'mpu' ? 'MPU' : 'Core'}</span>
+                    )}
+
+                    {/* Part 3: Status */}
+                    <span>{statusPart}</span>
+
                 </div>
             </div>
 
@@ -86,8 +123,11 @@ const SubjectCard = ({ subject, onClear }) => {
                     <span style={{ opacity: 0.6, fontSize: 12 }}>&nbsp;</span>
                 )}
 
-                {/* Chosen elective: show clear */}
-                {isElective && !isEmptyElective && (
+                {/*
+                   Only show button if !isEmptyElective AND onClear exists.
+                   If the parent passes onClear={null} (because it's completed), this button vanishes.
+                */}
+                {isElective && !isEmptyElective && onClear && (
                     <button
                         onClick={onClear}
                         aria-label={`Clear ${name}`}

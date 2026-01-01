@@ -30,36 +30,65 @@ function isFail(grade) {
 function applyAttemptsToPlan(dslPlan, attempts) {
     if (!attempts || attempts.length === 0) return dslPlan;
 
-    // Map to store the BEST status for every subject code
-    const bestStatusMap = new Map();
+    // 1. Group attempts by their Clean Subject Code
+    const attemptsBySubject = new Map();
 
     attempts.forEach(a => {
-        // Use our new global normalizer
+        // Clean Code: "BIS2212(MU32422)" -> "BIS2212"
         const cleanCode = normalizeCode(a.subjectCode);
 
-        let thisStatus = 'Planned';
-        const grade = String(a.grade || '').toUpperCase().trim();
-
-        // precise check for passing grades including exemptions
-        const passingGrades = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "P", "EX"];
-
-        if (passingGrades.includes(grade)) {
-            thisStatus = 'Completed';
-        } else if (grade === 'F' || grade === 'F*') {
-            thisStatus = 'Failed';
+        if (!attemptsBySubject.has(cleanCode)) {
+            attemptsBySubject.set(cleanCode, []);
         }
-
-        // Logic: Pass overwrites Fail. Fail does NOT overwrite Pass.
-        if (!bestStatusMap.has(cleanCode)) {
-            if (thisStatus !== 'Planned') bestStatusMap.set(cleanCode, thisStatus);
-        } else {
-            const currentBest = bestStatusMap.get(cleanCode);
-            if (thisStatus === 'Completed' && currentBest !== 'Completed') {
-                bestStatusMap.set(cleanCode, 'Completed');
-            }
-        }
+        attemptsBySubject.get(cleanCode).push(a);
     });
 
+    // 2. Determine Final Status for each subject based on the LATEST attempt
+    const finalStatusMap = new Map(); // Key: CleanCode -> "Completed" | "Failed"
+
+    attemptsBySubject.forEach((list, code) => {
+        // Sort attempts: Early Year -> Late Year -> Normal Status -> Resit Status
+        list.sort((a, b) => {
+            // Sort by Year
+            const yA = Number(a.examYear || 0);
+            const yB = Number(b.examYear || 0);
+            if (yA !== yB) return yA - yB;
+
+            // Sort by Month
+            const mA = Number(a.examMonth || 0);
+            const mB = Number(b.examMonth || 0);
+            if (mA !== mB) return mA - mB;
+
+            // Sort by Status Priority (Empty < RS < RP)
+            // We want Resits (RS) to come AFTER the main exam of the same month
+            const getWeight = (s) => {
+                const stat = String(s || '').toUpperCase();
+                if (stat.includes('RP')) return 3; // Retake/Repeat (Later)
+                if (stat.includes('RS')) return 2; // Resit (Later)
+                return 1; // Normal/Empty (First)
+            };
+            return getWeight(a.status) - getWeight(b.status);
+        });
+
+        // TAKE THE LAST ONE (The Latest Attempt)
+        const latest = list[list.length - 1];
+
+        // Clean the Grade: Removes "F*", "^" symbol, spaces
+        // "A-^" becomes "A-", "F*" becomes "F"
+        const rawGrade = String(latest.grade || '').toUpperCase();
+        const cleanGrade = rawGrade.replace(/[^A-Z0-9+\-]/g, '').trim();
+
+        const passingGrades = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "P", "EX"];
+
+        if (passingGrades.includes(cleanGrade)) {
+            finalStatusMap.set(code, 'Completed');
+        } else if (cleanGrade === 'F') {
+            finalStatusMap.set(code, 'Failed');
+        }
+        // If it's something else (like "Absent"), we leave it as default/Planned
+    });
+
+    // 3. Apply to Plan
     return (dslPlan || []).map(y => ({
         ...y,
         semesters: y.semesters.map(s => ({
@@ -68,8 +97,8 @@ function applyAttemptsToPlan(dslPlan, attempts) {
                 const planCode = normalizeCode(sub.code);
 
                 let newStatus = sub.status || 'Planned';
-                if (bestStatusMap.has(planCode)) {
-                    newStatus = bestStatusMap.get(planCode);
+                if (finalStatusMap.has(planCode)) {
+                    newStatus = finalStatusMap.get(planCode);
                 }
 
                 return { ...sub, status: newStatus };

@@ -17,7 +17,9 @@ const SemesterColumn = ({
 
     // Allow elective options (from the panel) to hover over an elective slot
     const handleSlotDragOver = (e, subject) => {
-        if (subject.type !== "elective") return;
+        // LOCK: Don't allow dropping on completed subjects
+        if (subject.type !== "elective" || subject.status === 'Completed') return;
+
         e.preventDefault();// enables drop
         e.dataTransfer.dropEffect = "copy";
         setDragOverId(subject.id);
@@ -26,6 +28,9 @@ const SemesterColumn = ({
     // Handle the actual drop: apply the chosen elective to this slot
     const handleSlotDrop = (e, subject, data) => {
         e.preventDefault();
+        // LOCK: Double check status on drop
+        if (subject.status === 'Completed') return;
+
         console.log('drop on slot', subject.id, data);
         setDragOverId(null);
         try {
@@ -79,10 +84,13 @@ const SemesterColumn = ({
                         const isElectiveSlot = subject.type === "elective";
                         const isDragTarget = isElectiveSlot && dragOverId === subject.id;
 
+                        // Check if subject is locked
+                        const isCompleted = subject.status === 'Completed';
+
                         return (
                             <li
                                 key={subject.id}
-                                // Make ELECTIVE SLOTS droppable
+                                // Make ELECTIVE SLOTS droppable (Only if not completed)
                                 onDragOver={(e) => isElectiveSlot && handleSlotDragOver(e, subject)}
                                 onDrop={(e) => isElectiveSlot && handleSlotDrop(e, subject)}
                                 onDragLeave={() => isElectiveSlot && setDragOverId(null)}
@@ -100,11 +108,12 @@ const SemesterColumn = ({
                                     onChangeStatus={(next) =>
                                         onChangeStatus?.(semesterId, subject.id, next)
                                     }
-                                    onClear={() => onClearElective?.(semesterId, subject.id)}
+                                    // LOCK: If completed, pass null so SubjectCard doesn't render the 'X'
+                                    onClear={isCompleted ? null : () => onClearElective?.(semesterId, subject.id)}
                                 />
 
-                                {/** Show action for ALL electives; label toggles automatically */}
-                                {isElectiveSlot && subject.bucketId && (
+                                {/** Show action for electives; BUT HIDE IF COMPLETED */}
+                                {isElectiveSlot && subject.bucketId && !isCompleted && (
                                     <div style={{ marginTop: 6 }}>
                                         <button
                                             className="app-button"

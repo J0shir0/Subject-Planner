@@ -5,8 +5,6 @@ import ElectivePanel from './ElectivePanel.jsx';
 import { parseSubjectPlanDSL } from './parseSubjectPlanDSL.js';
 import { fetchAttempts } from '../web/apiClient.js';
 
-// --- helpers ---------------------------------------------------------
-
 const getProgress = (plan) => {
     const all = (plan || []).flatMap(y => y.semesters).flatMap(s => s.subjects || []);
     const total = all.length || 0;
@@ -26,6 +24,24 @@ function isFail(grade) {
     return g === 'F' || g === 'F*';
 }
 
+// --- SAFE SORT HELPER ---
+// Extracts "202501" from "Sem 1 (2025-01)" safely
+const getSemesterDateValue = (semObj) => {
+    // 1. Safety check: Try 'name', then 'title', then empty string
+    const nameStr = semObj.name || semObj.title || "";
+
+    // 2. Try to find the date pattern (YYYY-MM)
+    const match = nameStr.match(/\((\d{4})-(\d{2})\)/);
+
+    // 3. If found, return numeric value (e.g. 202501)
+    if (match) {
+        return parseInt(match[1]) * 100 + parseInt(match[2]);
+    }
+
+    // 4. Fallback: If no date, put it at the end (999999)
+    return 999999;
+};
+
 // overlay pass / fail into a DSL plan
 function applyAttemptsToPlan(dslPlan, attempts) {
     if (!attempts || attempts.length === 0) return dslPlan;
@@ -34,9 +50,7 @@ function applyAttemptsToPlan(dslPlan, attempts) {
     const attemptsBySubject = new Map();
 
     attempts.forEach(a => {
-        // Clean Code: "BIS2212(MU32422)" -> "BIS2212"
         const cleanCode = normalizeCode(a.subjectCode);
-
         if (!attemptsBySubject.has(cleanCode)) {
             attemptsBySubject.set(cleanCode, []);
         }
@@ -44,37 +58,28 @@ function applyAttemptsToPlan(dslPlan, attempts) {
     });
 
     // 2. Determine Final Status for each subject based on the LATEST attempt
-    const finalStatusMap = new Map(); // Key: CleanCode -> "Completed" | "Failed"
+    const finalStatusMap = new Map();
 
     attemptsBySubject.forEach((list, code) => {
-        // Sort attempts: Early Year -> Late Year -> Normal Status -> Resit Status
         list.sort((a, b) => {
-            // Sort by Year
             const yA = Number(a.examYear || 0);
             const yB = Number(b.examYear || 0);
             if (yA !== yB) return yA - yB;
 
-            // Sort by Month
             const mA = Number(a.examMonth || 0);
             const mB = Number(b.examMonth || 0);
             if (mA !== mB) return mA - mB;
 
-            // Sort by Status Priority (Empty < RS < RP)
-            // We want Resits (RS) to come AFTER the main exam of the same month
             const getWeight = (s) => {
                 const stat = String(s || '').toUpperCase();
-                if (stat.includes('RP')) return 3; // Retake/Repeat (Later)
-                if (stat.includes('RS')) return 2; // Resit (Later)
-                return 1; // Normal/Empty (First)
+                if (stat.includes('RP')) return 3;
+                if (stat.includes('RS')) return 2;
+                return 1;
             };
             return getWeight(a.status) - getWeight(b.status);
         });
 
-        // TAKE THE LAST ONE (The Latest Attempt)
         const latest = list[list.length - 1];
-
-        // Clean the Grade: Removes "F*", "^" symbol, spaces
-        // "A-^" becomes "A-", "F*" becomes "F"
         const rawGrade = String(latest.grade || '').toUpperCase();
         const cleanGrade = rawGrade.replace(/[^A-Z0-9+\-]/g, '').trim();
 
@@ -85,7 +90,6 @@ function applyAttemptsToPlan(dslPlan, attempts) {
         } else if (cleanGrade === 'F') {
             finalStatusMap.set(code, 'Failed');
         }
-        // If it's something else (like "Absent"), we leave it as default/Planned
     });
 
     // 3. Apply to Plan
@@ -95,26 +99,20 @@ function applyAttemptsToPlan(dslPlan, attempts) {
             ...s,
             subjects: (s.subjects || []).map(sub => {
                 const planCode = normalizeCode(sub.code);
-
                 let newStatus = sub.status || 'Planned';
                 if (finalStatusMap.has(planCode)) {
                     newStatus = finalStatusMap.get(planCode);
                 }
-
                 return { ...sub, status: newStatus };
             }),
         })),
     }));
 }
 
-// add extra passed subjects that are not in the DSL plan
-// add extra passed subjects that are not in the DSL plan
-// add extra passed subjects that are not in the DSL plan
-
 const normalizeCode = (code) =>
     String(code || "")
         .toUpperCase()
-        .split('(')[0] // <--- Removes the (MU32422) part
+        .split('(')[0]
         .replace(/\s+/g, "")
         .trim();
 
@@ -129,58 +127,44 @@ const normalizeTitle = (title) =>
 function augmentWithExtraPassedMPUs(plan, attempts) {
     if (!plan || !attempts) return plan;
 
-    // helper: map exam month to canonical semester month (01, 04, 09)
     function mapExamToPlanYm(year, rawMonth) {
         const m = Number(rawMonth);
         if (!year || !m) return null;
-
         let semYear = year;
         let semMonth;
 
         if (m === 1) {
-            // January Exam = September Semester of Previous Year
             semMonth = 9;
             semYear = year - 1;
         } else if (m === 2 || m === 3) {
-            semMonth = 1;            // Jan semester (Current Year)
+            semMonth = 1;
         } else if (m >= 4 && m <= 8) {
-            semMonth = 4;            // Apr semester (Current Year)
+            semMonth = 4;
         } else {
-            semMonth = 9;            // Sep semester (Current Year)
+            semMonth = 9;
         }
-
         const mm = String(semMonth).padStart(2, "0");
-        return `${semYear}-${mm}`;      // e.g. Exam 2025-01 -> Returns "2024-09"
+        return `${semYear}-${mm}`;
     }
 
-
-    // 1) collect all codes that already exist in the DSL plan
     const inPlan = new Set(
-        plan
-            .flatMap((y) => y.semesters)
+        plan.flatMap((y) => y.semesters)
             .flatMap((s) => s.subjects || [])
             .map((sub) => normalizeCode(sub.code))
     );
 
-    // 2) find extra passed BKA attempts NOT already in the plan
     const extras = (attempts || []).filter((a) => {
         const codeNorm = normalizeCode(a.subjectCode);
         if (!codeNorm) return false;
-
-        // special BKA codes: new (MPU3232) and old (MU22113)
-        const isBka =
-            codeNorm === "MPU3232" ||
-            codeNorm === "MU22113";
-
+        const isBka = codeNorm === "MPU3232" || codeNorm === "MU22113";
         if (!isBka) return false;
-        if (!isPass(a.grade)) return false;         // only passed
-        if (inPlan.has(codeNorm)) return false;     // already in DSL
+        if (!isPass(a.grade)) return false;
+        if (inPlan.has(codeNorm)) return false;
         return true;
     });
 
     if (extras.length === 0) return plan;
 
-    // 3) shallow-copy plan so we don't mutate original
     const next = plan.map((y) => ({
         ...y,
         semesters: y.semesters.map((s) => ({
@@ -189,7 +173,6 @@ function augmentWithExtraPassedMPUs(plan, attempts) {
         })),
     }));
 
-    // 4) place each extra BKA into the correct semester
     for (const a of extras) {
         const codeNorm = normalizeCode(a.subjectCode);
         const title = a.subjectName || "Bahasa Kebangsaan A";
@@ -198,29 +181,23 @@ function augmentWithExtraPassedMPUs(plan, attempts) {
         const month = Number(a.examMonth ?? a.exammonth);
         if (!year || !month) continue;
 
-        const ymCanonical = mapExamToPlanYm(year, month); // e.g. "2023-01"
-
+        const ymCanonical = mapExamToPlanYm(year, month);
         let yearEntry = null;
         let sem = null;
 
         if (ymCanonical) {
             yearEntry = next.find((y) =>
-                y.semesters.some(
-                    (s) =>
-                        typeof s.title === "string" &&
-                        s.title.includes(`(${ymCanonical})`)
+                y.semesters.some((s) =>
+                    (s.title || s.name || "").includes(`(${ymCanonical})`)
                 )
             );
             if (yearEntry) {
-                sem = yearEntry.semesters.find(
-                    (s) =>
-                        typeof s.title === "string" &&
-                        s.title.includes(`(${ymCanonical})`)
+                sem = yearEntry.semesters.find((s) =>
+                    (s.title || s.name || "").includes(`(${ymCanonical})`)
                 );
             }
         }
 
-        // fallback: match by year only
         if (!yearEntry) {
             yearEntry = next.find((y) => String(y.year) === String(year));
         }
@@ -230,13 +207,12 @@ function augmentWithExtraPassedMPUs(plan, attempts) {
             const titleYm = ymCanonical || `${year}`;
             sem = {
                 id: `extra-${titleYm}`,
-                title: `Extra subjects (${titleYm})`,
+                title: `Extra subjects (${titleYm})`, // Uses 'title' here
                 subjects: [],
             };
             yearEntry.semesters.push(sem);
         }
 
-        // avoid double-inserting if already added
         const alreadyThere = sem.subjects.some(
             (sub) => normalizeCode(sub.code) === codeNorm
         );
@@ -248,7 +224,7 @@ function augmentWithExtraPassedMPUs(plan, attempts) {
             name: title,
             credits: null,
             status: "Completed",
-            type: "mpu",     // shows as MPU in card
+            type: "mpu",
         });
     }
 
@@ -258,7 +234,6 @@ function augmentWithExtraPassedMPUs(plan, attempts) {
 function autoFillElectivesFromAttempts(plan, attempts, bucketsObj) {
     if (!plan || !attempts || !bucketsObj) return plan;
 
-    // All passed attempts (normalised)
     const passedAttempts = (attempts || [])
         .filter(a => isPass(a.grade))
         .map((a, index) => ({
@@ -270,7 +245,6 @@ function autoFillElectivesFromAttempts(plan, attempts, bucketsObj) {
 
     if (!passedAttempts.length) return plan;
 
-    // Bucket options with normalised code + title
     const bucketOptions = {};
     Object.entries(bucketsObj).forEach(([bucketId, opts]) => {
         bucketOptions[bucketId] = (opts || []).map(opt => ({
@@ -288,11 +262,7 @@ function autoFillElectivesFromAttempts(plan, attempts, bucketsObj) {
             ...s,
             subjects: (s.subjects || []).map(sub => {
                 if (sub.type !== 'elective') return sub;
-
-                const isEmpty =
-                    sub.code === 'ELECTIVE' ||
-                    /TBD/i.test(sub.name || '');
-
+                const isEmpty = sub.code === 'ELECTIVE' || /TBD/i.test(sub.name || '');
                 if (!isEmpty) return sub;
 
                 const options = bucketOptions[sub.bucketId] || [];
@@ -301,7 +271,6 @@ function autoFillElectivesFromAttempts(plan, attempts, bucketsObj) {
                 let matchOpt = null;
                 let matchAttemptIdx = null;
 
-                // Find a passed attempt that matches by code OR by title
                 for (const opt of options) {
                     const attempt = passedAttempts.find(a =>
                         !usedAttemptIdx.has(a.index) &&
@@ -318,7 +287,6 @@ function autoFillElectivesFromAttempts(plan, attempts, bucketsObj) {
                 }
 
                 if (!matchOpt) return sub;
-
                 usedAttemptIdx.add(matchAttemptIdx);
 
                 return {
@@ -335,9 +303,6 @@ function autoFillElectivesFromAttempts(plan, attempts, bucketsObj) {
     return next;
 }
 
-
-
-// merge elective choices / statuses from a saved plan into a fresh base / Preserves choices, fixes structure
 function mergeSavedPlan(basePlan, savedRaw) {
     const savedPlan = Array.isArray(savedRaw)
         ? savedRaw
@@ -345,7 +310,6 @@ function mergeSavedPlan(basePlan, savedRaw) {
 
     if (!savedPlan) return basePlan;
 
-    // Index the saved data for quick lookup
     const index = new Map();
     for (const y of savedPlan) {
         for (const s of y.semesters || []) {
@@ -363,30 +327,16 @@ function mergeSavedPlan(basePlan, savedRaw) {
             subjects: (s.subjects || []).map(sub => {
                 const key = `${y.year}|${s.id}|${sub.id}`;
                 const saved = index.get(key);
-
-                // If no save data exists for this subject ID, keep the new DSL version
                 if (!saved) return sub;
 
-                // --- SMART RULE 1: STRUCTURAL INTEGRITY ---
-                // If the new DSL says this is a CORE subject (not an elective slot),
-                // we strictly forbid the Save File from changing its Code or Name.
-                // We ONLY allow the 'status' (Planned/Completed) to be imported.
                 if (sub.type !== 'elective') {
-                    // Check if the server says it's completed (Green)
                     const serverSaysCompleted = sub.status === 'Completed';
-                    const savedSaysCompleted = saved.status === 'Completed';
-
                     return {
-                        ...sub, // Keep the DSL's code, name, credits, and type!
-                        // Only use saved status if the server doesn't already say "Completed"
+                        ...sub,
                         status: serverSaysCompleted ? 'Completed' : (saved.status || sub.status)
                     };
                 }
 
-                // --- SMART RULE 2: ELECTIVE SLOTS ---
-                // For elective slots, we WANT the saved data (user choices)
-
-                // ...but don't let an empty saved slot overwrite a pre-filled one
                 const savedIsEmpty =
                     saved.type === 'elective' &&
                     (saved.code === 'ELECTIVE' || /TBD/i.test(saved.name || ''));
@@ -401,7 +351,6 @@ function mergeSavedPlan(basePlan, savedRaw) {
                     return sub;
                 }
 
-                // If it's a valid elective choice, keep it!
                 return {
                     ...sub,
                     code: saved.code ?? sub.code,
@@ -414,12 +363,11 @@ function mergeSavedPlan(basePlan, savedRaw) {
     }));
 }
 
-
 // --- component -------------------------------------------------------
 
 const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
-    const [plan, setPlan] = useState([]);               // DSL + statuses (+ electives)
-    const [activeSlot, setActiveSlot] = useState(null); // { slotId, bucketId, options? }
+    const [plan, setPlan] = useState([]);
+    const [activeSlot, setActiveSlot] = useState(null);
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState('');
     const [attemptErr, setAttemptErr] = useState('');
@@ -428,33 +376,26 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
         const saved = window.localStorage.getItem('planner_theme');
         return saved === 'light' ? 'light' : 'dark';
     });
-    // const [dupWarning, setDupWarning] = useState('');
-    const bucketsRef = useRef({});                      // bucketId -> options[]
+    const bucketsRef = useRef({});
 
     const progress = getProgress(plan);
+    const storageKey = student?.studentId && student?.cohort
+        ? `planner_plan_v2_${student.studentId}_${student.cohort}`
+        : null;
 
-    // key for localStorage so we remember electives per student+cohort
-    const storageKey =
-        student?.studentId && student?.cohort
-            ? `planner_plan_v2_${student.studentId}_${student.cohort}`
-            : null;
-
-    // load DSL + attempts and merge them
     const loadPlanWithStatus = useCallback(async () => {
         setErr('');
         setAttemptErr('');
-        // setDupWarning('');
         setLoading(true);
 
         try {
-            // 1) load DSL for this cohort
             const allPlans = import.meta.glob('/src/plans/*.dsl', {
                 query: '?raw',
                 import: 'default',
                 eager: true,
             });
 
-            const base = (planPath.split('/').pop() || '').trim(); // e.g. "2024-01.dsl"
+            const base = (planPath.split('/').pop() || '').trim();
             const candidates = [
                 base,
                 base.replace(/-/g, '_'),
@@ -470,16 +411,11 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
                 }
             }
 
-            if (!text) {
-                throw new Error(`Cohort file not found for ${base}`);
-            }
+            if (!text) throw new Error(`Cohort file not found for ${base}`);
 
-            const { plan: parsedPlan, buckets } =
-                parseSubjectPlanDSL(text.replace(/^\uFEFF/, ''));
-
+            const { plan: parsedPlan, buckets } = parseSubjectPlanDSL(text.replace(/^\uFEFF/, ''));
             bucketsRef.current = buckets;
 
-            // 2) fetch attempts for this student and overlay
             let attempts = [];
             try {
                 if (student?.studentId) {
@@ -490,18 +426,10 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
                 setAttemptErr(`Attempts fetch failed: ${e.message || e}`);
             }
 
-            // overlay attempts + extra MPUs
             const merged = applyAttemptsToPlan(parsedPlan, attempts);
             const mergedBase = augmentWithExtraPassedMPUs(merged, attempts);
+            const prefilled = autoFillElectivesFromAttempts(mergedBase, attempts, buckets);
 
-            // autofill elective slots from passed attempts (for older cohorts)
-            const prefilled = autoFillElectivesFromAttempts(
-                mergedBase,
-                attempts,
-                buckets
-            );
-
-            // apply any saved electives / manual statuses from localStorage
             let finalPlan = prefilled;
             if (storageKey) {
                 try {
@@ -514,7 +442,6 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
                     console.warn('[Planner] Failed to read saved plan', e);
                 }
             }
-
             setPlan(finalPlan);
 
         } catch (e) {
@@ -544,7 +471,6 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
         loadPlanWithStatus();
     }, [loadPlanWithStatus]);
 
-    // persist plan whenever it changes
     useEffect(() => {
         if (!storageKey || !plan || !plan.length) return;
         try {
@@ -553,8 +479,6 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
             console.warn('[Planner] Failed to save plan', e);
         }
     }, [plan, storageKey]);
-
-    // --- subject mutations (manual tweaking still works) --------------
 
     const handleChangeStatus = (semesterId, subjectId, nextStatus) => {
         setPlan(prev => prev.map(y => ({
@@ -575,7 +499,8 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
         setPlan(prev => prev.map(y => ({
             ...y,
             semesters: y.semesters.map(s => {
-                if (s.id !== semesterId) return s;
+                // IMPORTANT: Since we are filtering semesters in the UI, we must match by ID, not index.
+                if (s.id !== semesterId && s.name !== semesterId) return s;
                 return {
                     ...s,
                     subjects: s.subjects.map(sub => {
@@ -593,13 +518,8 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
         })));
     };
 
-    // --- elective panel wiring ---------------------------------------
-
     const openElective = ({ slotId, bucketId }) => {
-        // Original options from the DSL bucket
         const allOptions = bucketsRef.current[bucketId] || [];
-
-        // Find the semester that contains this slot
         let semesterWithSlot = null;
         for (const y of plan) {
             for (const s of y.semesters || []) {
@@ -611,13 +531,11 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
             if (semesterWithSlot) break;
         }
 
-        // If we somehow don't find the semester, just show all options
         if (!semesterWithSlot) {
             setActiveSlot({ slotId, bucketId, options: allOptions });
             return;
         }
 
-        // Collect codes already used in this semester for this bucket
         const usedCodes = new Set(
             (semesterWithSlot.subjects || [])
                 .filter(sub =>
@@ -630,7 +548,6 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
                 .map(sub => String(sub.code).toUpperCase().trim())
         );
 
-        // Filter out already-used electives from the list
         const filteredOptions = allOptions.filter(opt => {
             const c = String(opt.subjectId || '').toUpperCase().trim();
             return !usedCodes.has(c);
@@ -659,8 +576,6 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
                     if (!hasSlot) return s;
 
                     const codeUpper = String(subjectId || '').toUpperCase().trim();
-
-                    // Safety check: if something weird happened and we still have a duplicate
                     const alreadyUsed = s.subjects.some(sub =>
                         sub.id !== slotId &&
                         sub.type === 'elective' &&
@@ -669,7 +584,7 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
 
                     if (alreadyUsed) {
                         hadDuplicate = true;
-                        return s; // leave semester unchanged
+                        return s;
                     }
 
                     return {
@@ -695,13 +610,10 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
                     `You have already selected ${subjectId} in this semester. Please pick a different elective.`
                 );
             }
-            // keep panel open
         } else {
             closeElective();
         }
     };
-
-    // --- render -------------------------------------------------------
 
     return (
         <div className="app-shell" style={{minHeight: '100vh'}}>
@@ -711,44 +623,9 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
                 onLogout={onLogout}
                 theme={theme}
                 onToggleTheme={toggleTheme}
-                // onReset intentionally omitted: choices are persistent now
             />
 
             <div style={{padding: 16}}>
-
-                {/*{dupWarning && (*/}
-                {/*    <div*/}
-                {/*        style={{*/}
-                {/*            color: '#ffb3b3',*/}
-                {/*            background: '#401010',*/}
-                {/*            border: '1px solid #702020',*/}
-                {/*            borderRadius: 6,*/}
-                {/*            padding: '6px 10px',*/}
-                {/*            marginBottom: 8,*/}
-                {/*            display: 'flex',*/}
-                {/*            justifyContent: 'space-between',*/}
-                {/*            alignItems: 'center',*/}
-                {/*            fontSize: 13,*/}
-                {/*        }}*/}
-                {/*    >*/}
-                {/*        <span>{dupWarning}</span>*/}
-                {/*        <button*/}
-                {/*            onClick={() => setDupWarning('')}*/}
-                {/*            style={{*/}
-                {/*                marginLeft: 8,*/}
-                {/*                border: 'none',*/}
-                {/*                background: 'transparent',*/}
-                {/*                color: '#ffb3b3',*/}
-                {/*                cursor: 'pointer',*/}
-                {/*                fontSize: 14,*/}
-                {/*            }}*/}
-                {/*            aria-label="Dismiss duplicate warning"*/}
-                {/*        >*/}
-                {/*            ×*/}
-                {/*        </button>*/}
-                {/*    </div>*/}
-                {/*)}*/}
-
                 {loading && <div>Loading plan…</div>}
                 {err && <div style={{color: 'salmon', marginBottom: 8}}>{err}</div>}
                 {attemptErr && (
@@ -761,17 +638,32 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
                     </div>
                 )}
 
-                {plan.map(({year, semesters}) => (
-                    <YearSection
-                        key={year}
-                        year={year}
-                        semesters={semesters}
-                        onOpenElective={openElective}
-                        onChangeStatus={handleChangeStatus}
-                        onClearElective={handleClearElective}
-                        onDropElective={applyElectiveChoice}
-                    />
-                ))}
+                {plan.map(({year, semesters}) => {
+                    // 1. FILTER: Only keep semesters that actually have subjects
+                    const activeSemesters = semesters.filter(s =>
+                        s.subjects && s.subjects.length > 0
+                    );
+
+                    // 2. SORT: Sort by the date inside the brackets (2025-01) safely
+                    const sortedSemesters = activeSemesters.sort((a, b) => {
+                        return getSemesterDateValue(a) - getSemesterDateValue(b);
+                    });
+
+                    // 3. HIDE EMPTY YEARS
+                    if (sortedSemesters.length === 0) return null;
+
+                    return (
+                        <YearSection
+                            key={year}
+                            year={year}
+                            semesters={sortedSemesters}
+                            onOpenElective={openElective}
+                            onChangeStatus={handleChangeStatus}
+                            onClearElective={handleClearElective}
+                            onDropElective={applyElectiveChoice}
+                        />
+                    );
+                })}
             </div>
 
             {activeSlot && (

@@ -28,28 +28,51 @@ function isFail(grade) {
 
 // overlay pass / fail into a DSL plan
 function applyAttemptsToPlan(dslPlan, attempts) {
+    if (!attempts || attempts.length === 0) return dslPlan;
 
-    const passedSet = new Set(
-        (attempts || [])
-            .filter(a => isPass(a.grade))
-            .map(a => String(a.subjectCode || '').toUpperCase().trim())
-    );
-    const failedSet = new Set(
-        (attempts || [])
-            .filter(a => isFail(a.grade))
-            .map(a => String(a.subjectCode || '').toUpperCase().trim())
-    );
+    // Map to store the BEST status for every subject code
+    const bestStatusMap = new Map();
+
+    attempts.forEach(a => {
+        // Use our new global normalizer
+        const cleanCode = normalizeCode(a.subjectCode);
+
+        let thisStatus = 'Planned';
+        const grade = String(a.grade || '').toUpperCase().trim();
+
+        // precise check for passing grades including exemptions
+        const passingGrades = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "P", "EX"];
+
+        if (passingGrades.includes(grade)) {
+            thisStatus = 'Completed';
+        } else if (grade === 'F' || grade === 'F*') {
+            thisStatus = 'Failed';
+        }
+
+        // Logic: Pass overwrites Fail. Fail does NOT overwrite Pass.
+        if (!bestStatusMap.has(cleanCode)) {
+            if (thisStatus !== 'Planned') bestStatusMap.set(cleanCode, thisStatus);
+        } else {
+            const currentBest = bestStatusMap.get(cleanCode);
+            if (thisStatus === 'Completed' && currentBest !== 'Completed') {
+                bestStatusMap.set(cleanCode, 'Completed');
+            }
+        }
+    });
 
     return (dslPlan || []).map(y => ({
         ...y,
         semesters: y.semesters.map(s => ({
             ...s,
             subjects: (s.subjects || []).map(sub => {
-                const code = String(sub.code || '').toUpperCase().trim();
-                let status = sub.status || 'Planned';
-                if (passedSet.has(code)) status = 'Completed';
-                else if (failedSet.has(code)) status = 'Failed';
-                return { ...sub, status };
+                const planCode = normalizeCode(sub.code);
+
+                let newStatus = sub.status || 'Planned';
+                if (bestStatusMap.has(planCode)) {
+                    newStatus = bestStatusMap.get(planCode);
+                }
+
+                return { ...sub, status: newStatus };
             }),
         })),
     }));
@@ -62,6 +85,7 @@ function applyAttemptsToPlan(dslPlan, attempts) {
 const normalizeCode = (code) =>
     String(code || "")
         .toUpperCase()
+        .split('(')[0] // <--- Removes the (MU32422) part
         .replace(/\s+/g, "")
         .trim();
 
@@ -305,6 +329,19 @@ function mergeSavedPlan(basePlan, savedRaw) {
                 const saved = index.get(key);
                 if (!saved) return sub;
 
+                // Determine the saved status
+                const savedStatus = saved.status ?? sub.status;
+
+                // CRITICAL FIX:
+                // If the Server (sub.status) says it's Completed,
+                // we IGNORE the Saved status if the Saved status says "Planned".
+                let finalStatus = savedStatus;
+
+                if (sub.status === 'Completed' && savedStatus !== 'Completed') {
+                    finalStatus = 'Completed';
+                }
+
+                // Preserve elective choices logic
                 const savedIsEmptyElective =
                     saved.type === 'elective' &&
                     (saved.code === 'ELECTIVE' || /TBD/i.test(saved.name || ''));
@@ -315,7 +352,6 @@ function mergeSavedPlan(basePlan, savedRaw) {
                     sub.code &&
                     sub.code !== 'ELECTIVE';
 
-                // If we auto-filled a completed elective, don't let an old "empty" save wipe it.
                 if (savedIsEmptyElective && baseIsCompletedElective) {
                     return sub;
                 }
@@ -324,7 +360,7 @@ function mergeSavedPlan(basePlan, savedRaw) {
                     ...sub,
                     code: saved.code ?? sub.code,
                     name: saved.name ?? sub.name,
-                    status: saved.status ?? sub.status,
+                    status: finalStatus, // Use our smart status
                     credits: saved.credits ?? sub.credits,
                 };
             }),

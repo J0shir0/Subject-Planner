@@ -105,17 +105,23 @@ function augmentWithExtraPassedMPUs(plan, attempts) {
         const m = Number(rawMonth);
         if (!year || !m) return null;
 
+        let semYear = year;
         let semMonth;
-        if (m === 1 || m === 2 || m === 3) {
-            semMonth = 1;            // Jan semester
+
+        if (m === 1) {
+            // January Exam = September Semester of Previous Year
+            semMonth = 9;
+            semYear = year - 1;
+        } else if (m === 2 || m === 3) {
+            semMonth = 1;            // Jan semester (Current Year)
         } else if (m >= 4 && m <= 8) {
-            semMonth = 4;            // Apr semester
+            semMonth = 4;            // Apr semester (Current Year)
         } else {
-            semMonth = 9;            // Sep semester
+            semMonth = 9;            // Sep semester (Current Year)
         }
 
         const mm = String(semMonth).padStart(2, "0");
-        return `${year}-${mm}`;      // e.g. "2024-01"
+        return `${semYear}-${mm}`;      // e.g. Exam 2025-01 -> Returns "2024-09"
     }
 
 
@@ -302,7 +308,7 @@ function autoFillElectivesFromAttempts(plan, attempts, bucketsObj) {
 
 
 
-// merge elective choices / statuses from a saved plan into a fresh base
+// merge elective choices / statuses from a saved plan into a fresh base / Preserves choices, fixes structure
 function mergeSavedPlan(basePlan, savedRaw) {
     const savedPlan = Array.isArray(savedRaw)
         ? savedRaw
@@ -310,6 +316,7 @@ function mergeSavedPlan(basePlan, savedRaw) {
 
     if (!savedPlan) return basePlan;
 
+    // Index the saved data for quick lookup
     const index = new Map();
     for (const y of savedPlan) {
         for (const s of y.semesters || []) {
@@ -327,40 +334,50 @@ function mergeSavedPlan(basePlan, savedRaw) {
             subjects: (s.subjects || []).map(sub => {
                 const key = `${y.year}|${s.id}|${sub.id}`;
                 const saved = index.get(key);
+
+                // If no save data exists for this subject ID, keep the new DSL version
                 if (!saved) return sub;
 
-                // Determine the saved status
-                const savedStatus = saved.status ?? sub.status;
+                // --- SMART RULE 1: STRUCTURAL INTEGRITY ---
+                // If the new DSL says this is a CORE subject (not an elective slot),
+                // we strictly forbid the Save File from changing its Code or Name.
+                // We ONLY allow the 'status' (Planned/Completed) to be imported.
+                if (sub.type !== 'elective') {
+                    // Check if the server says it's completed (Green)
+                    const serverSaysCompleted = sub.status === 'Completed';
+                    const savedSaysCompleted = saved.status === 'Completed';
 
-                // CRITICAL FIX:
-                // If the Server (sub.status) says it's Completed,
-                // we IGNORE the Saved status if the Saved status says "Planned".
-                let finalStatus = savedStatus;
-
-                if (sub.status === 'Completed' && savedStatus !== 'Completed') {
-                    finalStatus = 'Completed';
+                    return {
+                        ...sub, // Keep the DSL's code, name, credits, and type!
+                        // Only use saved status if the server doesn't already say "Completed"
+                        status: serverSaysCompleted ? 'Completed' : (saved.status || sub.status)
+                    };
                 }
 
-                // Preserve elective choices logic
-                const savedIsEmptyElective =
+                // --- SMART RULE 2: ELECTIVE SLOTS ---
+                // For elective slots, we WANT the saved data (user choices)
+
+                // ...but don't let an empty saved slot overwrite a pre-filled one
+                const savedIsEmpty =
                     saved.type === 'elective' &&
                     (saved.code === 'ELECTIVE' || /TBD/i.test(saved.name || ''));
 
-                const baseIsCompletedElective =
+                const baseIsFilled =
                     sub.type === 'elective' &&
                     sub.status === 'Completed' &&
                     sub.code &&
                     sub.code !== 'ELECTIVE';
 
-                if (savedIsEmptyElective && baseIsCompletedElective) {
+                if (savedIsEmpty && baseIsFilled) {
                     return sub;
                 }
 
+                // If it's a valid elective choice, keep it!
                 return {
                     ...sub,
                     code: saved.code ?? sub.code,
                     name: saved.name ?? sub.name,
-                    status: finalStatus, // Use our smart status
+                    status: saved.status ?? sub.status,
                     credits: saved.credits ?? sub.credits,
                 };
             }),
@@ -390,7 +407,7 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
     // key for localStorage so we remember electives per student+cohort
     const storageKey =
         student?.studentId && student?.cohort
-            ? `planner_plan_${student.studentId}_${student.cohort}`
+            ? `planner_plan_v2_${student.studentId}_${student.cohort}`
             : null;
 
     // load DSL + attempts and merge them

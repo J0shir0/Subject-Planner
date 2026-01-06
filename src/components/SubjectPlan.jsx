@@ -545,26 +545,46 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
     const closeElective = () => setActiveSlot(null);
 
     const applyElectiveChoice = ({ slotId, subjectId, title, credits }) => {
-        let hadDuplicate = false;
+        // --- 1. GLOBAL DUPLICATE CHECK ---
+        const codeToCheck = String(subjectId || '').toUpperCase().trim();
+        let isDuplicate = false;
 
+        // Iterate over the current 'plan' state synchronously
+        for (const y of plan) {
+            for (const s of y.semesters || []) {
+                for (const sub of s.subjects || []) {
+                    // Skip the slot we are currently editing to avoid false positive on self
+                    if (sub.id === slotId) continue;
+
+                    const existingCode = String(sub.code || '').toUpperCase().trim();
+                    if (existingCode === codeToCheck) {
+                        isDuplicate = true;
+                        break;
+                    }
+                }
+                if (isDuplicate) break;
+            }
+            if (isDuplicate) break;
+        }
+
+        if (isDuplicate) {
+            if (typeof window !== 'undefined') {
+                window.alert(
+                    `You have already selected ${title || subjectId} (${subjectId}) in another semester!`
+                );
+            }
+            // Do not update state; keep the slot as TBD
+            closeElective();
+            return;
+        }
+
+        // --- 2. UPDATE STATE (If Valid) ---
         setPlan(prev =>
             prev.map(y => ({
                 ...y,
                 semesters: y.semesters.map(s => {
                     const hasSlot = s.subjects.some(sub => sub.id === slotId);
                     if (!hasSlot) return s;
-
-                    const codeUpper = String(subjectId || '').toUpperCase().trim();
-                    const alreadyUsed = s.subjects.some(sub =>
-                        sub.id !== slotId &&
-                        sub.type === 'elective' &&
-                        String(sub.code || '').toUpperCase().trim() === codeUpper
-                    );
-
-                    if (alreadyUsed) {
-                        hadDuplicate = true;
-                        return s;
-                    }
 
                     return {
                         ...s,
@@ -583,15 +603,7 @@ const SubjectPlan = ({ student, planPath = 'plans/2024-01.dsl', onLogout }) => {
             }))
         );
 
-        if (hadDuplicate) {
-            if (typeof window !== 'undefined') {
-                window.alert(
-                    `You have already selected ${subjectId} in this semester. Please pick a different elective.`
-                );
-            }
-        } else {
-            closeElective();
-        }
+        closeElective();
     };
 
     // --- RENDER LOGIC ---
